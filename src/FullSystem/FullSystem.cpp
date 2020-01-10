@@ -851,7 +851,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	FrameHessian* fh = new FrameHessian();
 	FrameShell* shell = new FrameShell();
 	shell->camToWorld = SE3(); 		// no lock required, as fh is not used anywhere yet.
-	shell->aff_g2l = AffLight(0,0);
+	shell->aff_g2l = AffLight(0,0); // 光度模型和曝光量
     shell->marginalizedAt = shell->id = allFrameHistory.size();
     shell->timestamp = image->timestamp;
     shell->incoming_id = id;
@@ -861,11 +861,11 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	//[ ***step 3*** ] 得到曝光时间, 生成金字塔, 计算整个图像梯度
 	// =========================== make Images / derivatives etc. =========================
 	fh->ab_exposure = image->exposure_time;
-    fh->makeImages(image->image, &Hcalib);
+    fh->makeImages(image->image, &Hcalib);  // 构造 dl，梯度图像
 
 
 
-	//[ ***step 4*** ] 进行初始化
+	//[ ***step 4*** ] 如果未进行初始化，就进行初始化
 	if(!initialized)
 	{
 		// use initializer!
@@ -877,21 +877,21 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
 		{
 		//[ ***step 4.2*** ] 跟踪成功, 完成初始化
-			initializeFromInitializer(fh);
+			initializeFromInitializer(fh);  // 做一系列初始化之后的事情
 			lock.unlock();
 			deliverTrackedFrame(fh, true);
 		}
 		else
 		{
 			// if still initializing
-			fh->shell->poseValid = false;
+			fh->shell->poseValid = false;  // 如果用当前帧初始化失败，就删除当前帧
 			delete fh;
 		}
 		return;
 	}
 	else	// do front-end operation.
 	{
-//[ ***step 5*** ] 对新来的帧进行跟踪, 得到位姿光度, 判断跟踪状态
+//[ ***step 5*** ] 如果已经初始化过了，对新来的帧进行跟踪, 得到位姿光度, 判断跟踪状态
 		// =========================== SWAP tracking reference?. =========================
 		if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
 		{
@@ -910,12 +910,13 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
         }
 //[ ***step 6*** ] 判断是否插入关键帧
 		bool needToMakeKF = false;
-		if(setting_keyframesPerSecond > 0)  // 每隔多久插入关键帧
+		if(setting_keyframesPerSecond > 0)  // 每隔多久插入关键帧，如果有设置了时间参数（每秒多少张KF）
 		{
+			// 插入关键帧的条件： 1）历史库中数量为1；2）或者，当前帧距离历史库中最后一帧的时间超过 0.95*setting_keyframesPerSecond
 			needToMakeKF = allFrameHistory.size()== 1 ||
 					(fh->shell->timestamp - allKeyFramesHistory.back()->timestamp) > 0.95f/setting_keyframesPerSecond;
 		}
-		else
+		else  // 如果没有设置这个参数
 		{
 			Vec2 refToFh=AffLight::fromToVecExposure(coarseTracker->lastRef->ab_exposure, fh->ab_exposure,
 					coarseTracker->lastRef_aff_g2l, fh->shell->aff_g2l);

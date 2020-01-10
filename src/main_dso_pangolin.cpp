@@ -359,6 +359,7 @@ int main( int argc, char** argv )
 	boost::thread exThread = boost::thread(exitThread);
 
 
+	// Reader 负责解析数据，source 就是命令行填的 files
 	ImageFolderReader* reader = new ImageFolderReader(source,calib, gammaCalib, vignette);
 	reader->setGlobalCalibration();
 

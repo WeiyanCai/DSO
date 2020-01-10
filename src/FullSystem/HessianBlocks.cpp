@@ -157,12 +157,12 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 		float* dabs_l = absSquaredGrad[lvl];
 		if(lvl>0)
 		{
-			int lvlm1 = lvl-1;
+			int lvlm1 = lvl-1;  // 带 m1 的为上一层
 			int wlm1 = wG[lvlm1]; // 列数
 			Eigen::Vector3f* dI_lm = dIp[lvlm1];
 
 
-			// 像素4合1, 生成金字塔
+			// 像素4合1, 生成金字塔，图像 w 变为 wm1/2，h 变为 hm1/2
 			for(int y=0;y<hl;y++)
 				for(int x=0;x<wl;x++)
 				{
@@ -193,7 +193,8 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 				//! 乘上响应函数, 变换回正常的颜色, 因为光度矫正时 I = G^-1(I) / V(x)
 				float gw = HCalib->getBGradOnly((float)(dI_l[idx][0])); 
 				dabs_l[idx] *= gw*gw;	// convert to gradient of original color space (before removing response).
-			}
+				//* dabs_l[idx] = (gw*dx) * (gw*dx) + (gw*dy) * (gw*dy)
+ 			}
 		}
 	}
 }

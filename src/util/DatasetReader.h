@@ -280,7 +280,10 @@ private:
 
 	ImageAndExposure* getImage_internal(int id, int unused)
 	{
+		// 通过自己的ImageRW_OpenCV接口把图像读出来，这里的大小是原大小, MinimalImageB 其实就是 w, h, data 指针组成的，应该是为了不要 OpenCV
 		MinimalImageB* minimg = getImageRaw_internal(id, 0);
+
+		// 每次要取出图片的时候就在这里做 undistortion
 		ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
 				minimg,
 				(exposures.size() == 0 ? 1.0f : exposures[id]),

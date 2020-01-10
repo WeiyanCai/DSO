@@ -137,26 +137,26 @@ inline int gridMaxSelection(Eigen::Vector3f* grads, bool* map_out, int w, int h,
 			float bestXX=0, bestYY=0, bestXY=0, bestYX=0;
 
 			Eigen::Vector3f* grads0 = grads+x+y*w;
-			for(int dx=0;dx<pot;dx++)
+			for(int dx=0;dx<pot;dx++)   //[cc] 在步长之内遍历
 				for(int dy=0;dy<pot;dy++)
 				{
 					int idx = dx+dy*w;
 					Eigen::Vector3f g=grads0[idx];
-					float sqgd = g.tail<2>().squaredNorm();
+					float sqgd = g.tail<2>().squaredNorm(); //[cc] sqrt(dx*dx+dy*dy)
 					float TH = THFac*minUseGrad_pixsel * (0.75f);
 
 					if(sqgd > TH*TH)
 					{
-						float agx = fabs((float)g[1]);
+						float agx = fabs((float)g[1]); // |dx|
 						if(agx > bestXX) {bestXX=agx; bestXXID=idx;}
 
-						float agy = fabs((float)g[2]);
+						float agy = fabs((float)g[2]); // |dy|
 						if(agy > bestYY) {bestYY=agy; bestYYID=idx;}
 
-						float gxpy = fabs((float)(g[1]-g[2]));
+						float gxpy = fabs((float)(g[1]-g[2])); // |dx - dy|
 						if(gxpy > bestXY) {bestXY=gxpy; bestXYID=idx;}
 
-						float gxmy = fabs((float)(g[1]+g[2]));
+						float gxmy = fabs((float)(g[1]+g[2])); // |dx + dy|
 						if(gxmy > bestYX) {bestYX=gxmy; bestYXID=idx;}
 					}
 				}
@@ -197,10 +197,11 @@ inline int gridMaxSelection(Eigen::Vector3f* grads, bool* map_out, int w, int h,
 	return numGood;
 }
 
-
+// desiredDensity: 是外面的densities[lvl]*w[0]*h[0]
+// recsLeft: 剩余迭代次数
 inline int makePixelStatus(Eigen::Vector3f* grads, bool* map, int w, int h, float desiredDensity, int recsLeft=5, float THFac = 1)
 {
-	if(sparsityFactor < 1) sparsityFactor = 1; // 网格的大小, 在网格内选择最大的
+	if(sparsityFactor < 1) sparsityFactor = 1; // 网格的大小, 在网格内选择最大的，步长pot
 
 	int numGoodPoints;
 

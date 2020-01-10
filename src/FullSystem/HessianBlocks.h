@@ -137,7 +137,7 @@ struct FrameHessian
 
 	// Photometric Calibration Stuff
 	float frameEnergyTH;	//!< 阈值 // set dynamically depending on tracking residual
-	float ab_exposure;
+	float ab_exposure;      //![cc] 在一进来FullSystem::addActiveFrame时被赋值为image->exposure_time
 
 	bool flaggedForMarginalization;
 
@@ -404,7 +404,7 @@ struct CalibHessian
 		int c = color+0.5f;
 		if(c<5) c=5;
 		if(c>250) c=250;
-		return B[c+1]-B[c];
+		return B[c+1]-B[c];  // 离散值的导数
 	}
 	//* 响应函数逆的导数
 	EIGEN_STRONG_INLINE float getBInvGradOnly(float color)

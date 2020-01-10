@@ -119,12 +119,14 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	AffLight refToNew_aff_current = thisToNext_aff;
 
 	// 如果都有仿射系数, 则估计一个初值
-	if(firstFrame->ab_exposure>0 && newFrame->ab_exposure>0)
+	if(firstFrame->ab_exposure>0 && newFrame->ab_exposure>0)  //[cc]如果有曝光时间值
 		refToNew_aff_current = AffLight(logf(newFrame->ab_exposure /  firstFrame->ab_exposure),0); // coarse approximation.
+		//[cc] a21 = t2/t1 这部分在JingeTU的博客里有写
 
 
 	Vec3f latestRes = Vec3f::Zero();
 	// 从顶层开始估计
+	//[cc] 从最高层开始（应该是金字塔的底层吧？）
 	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)
 	{ 
 
@@ -181,7 +183,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 				inc.tail<2>().setZero();
 			}
 			else
-				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b.
+				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b. = H^-1 * g  //[cc]之所以前面有负号是因为b是g被挪到左边的值
 
 //[ ***step 5.3*** ] 更新状态, doStep中更新逆深度
 			SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
@@ -217,7 +219,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 						inc.norm());
 				std::cout << refToNew_new.log().transpose() << " AFF " << refToNew_aff_new.vec().transpose() <<"\n";
 			}
-//[ ***step 5.5*** ] 接受的话, 更新状态,; 不接受则增大lambda
+//[ ***step 5.5*** ] 接受的话, 更新状态，并减小lambda; 不接受则增大lambda
 			if(accept)
 			{
 				//? 这是啥   答：应该是位移足够大，才开始优化IR
@@ -247,6 +249,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			// 迭代停止条件, 收敛/大于最大次数/失败2次以上
 			if(!(inc.norm() > eps) || iteration >= maxIterations[lvl] || fails >= 2)
 			{
+				//[cc] 清空
 				Mat88f H,Hsc; Vec8f b,bsc;
 
 				quitOpt = true;
@@ -338,7 +341,7 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
 
 
 //* 计算能量函数和Hessian矩阵, 以及舒尔补, sc代表Schur
-// calculates residual, Hessian and Hessian-block neede for re-substituting depth.
+// calculates residual, Hessian and Hessian-block needed for re-substituting depth.
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
 		Mat88f &H_out_sc, Vec8f &b_out_sc,
@@ -353,7 +356,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	//! 旋转矩阵R * 内参矩阵K_inv
 	Mat33f RKi = (refToNew.rotationMatrix() * Ki[lvl]).cast<float>();
 	Vec3f t = refToNew.translation().cast<float>(); // 平移
-	Eigen::Vector2f r2new_aff = Eigen::Vector2f(exp(refToNew_aff.a), refToNew_aff.b); // 光度参数
+	Eigen::Vector2f r2new_aff = Eigen::Vector2f(exp(refToNew_aff.a), refToNew_aff.b); // 光度参数 a21：ref帧中的辐射值变换到new帧当中
 
 	// 该层的相机参数
 	float fxl = fx[lvl];
@@ -362,7 +365,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 	float cyl = cy[lvl];
 
 
-	Accumulator11 E;  // 1*1 的累加器
+	Accumulator11 E;  // 1*1 的累加器 即E是一个数
 	acc9.initialize(); // 初始值, 分配空间
 	E.initialize();
 
@@ -383,6 +386,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			continue;
 		}
 
+		//[cc] VecNRf Mat(8, 1)
         VecNRf dp0;  // 8*1矩阵, 每个点附近的残差个数为8个
         VecNRf dp1;
         VecNRf dp2;
@@ -405,7 +409,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			int dy = patternP[idx][1];
 
 			//! Pj' = R*(X/Z, Y/Z, 1) + t/Z, 变换到新的点, 深度仍然使用Host帧的!
-			Vec3f pt = RKi * Vec3f(point->u+dx, point->v+dy, 1) + t*point->idepth_new; 
+			Vec3f pt = RKi * Vec3f(point->u+dx, point->v+dy, 1) + t*point->idepth_new;
 			// 归一化坐标 Pj
 			float u = pt[0] / pt[2];
 			float v = pt[1] / pt[2];
@@ -437,12 +441,15 @@ Vec3f CoarseInitializer::calcResAndGS(
 			}
 
 			// 残差
+			// 计算值 I2 = a21 * I1 - b21
+			// 真实值 I2‘
+			// r = I2' - a21 * I1 - b21 = I2' - I2
 			float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
 			// Huber权重
 			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual); 
 			// huberweight * (2-huberweight) = Objective Function
 			// robust 权重和函数之间的关系
-			energy += hw *residual*residual*(2-hw);
+			energy += hw *residual*residual*(2-hw);  //[cc] 在林突破的CSDN博客里有较好的解释
 
 
 
@@ -452,11 +459,13 @@ Vec3f CoarseInitializer::calcResAndGS(
 			//! 1/Pz * (ty - v*tz), u = py/pz
 			float dydd = (t[1]-t[2]*v)/pt[2];
 
-			if(hw < 1) hw = sqrtf(hw); //?? 为啥开根号, 答: 鲁棒核函数等价于加权最小二乘
+			//[cc] H = hwr^2(1 - hw/2)
+			//[cc] f(x) = sqrt(hw) * r
+			if(hw < 1) hw = sqrtf(hw); //?? 为啥开根号, 答: 鲁棒核函数等价于加权最小二乘  f
 			//! dxfx, dyfy
 			float dxInterp = hw*hitColor[1]*fxl;
 			float dyInterp = hw*hitColor[2]*fyl;
-			//* 残差对 j(新状态) 位姿求导, 
+			//* 残差对 j(新状态) 位姿求导,  1*6
 			dp0[idx] = new_idepth*dxInterp; //! dpi/pz' * dxfx
 			dp1[idx] = new_idepth*dyInterp; //! dpi/pz' * dyfy
 			dp2[idx] = -new_idepth*(u*dxInterp + v*dyInterp); //! -dpi/pz' * (px'/pz'*dxfx + py'/pz'*dyfy)
@@ -464,7 +473,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			dp4[idx] = (1+u*u)*dxInterp + u*v*dyInterp; //! (1+px'^2/pz'^2)*dxfx + px'py'/pz'^2*dxfy
 			dp5[idx] = -v*dxInterp + u*dyInterp; //! -py'/pz'*dxfx + px'/pz'*dyfy
 			//* 残差对光度参数求导
-			dp6[idx] = - hw*r2new_aff[0] * rlR; //! exp(aj-ai)*I(pi)
+			dp6[idx] = - hw*r2new_aff[0] * rlR; //! exp(aj-ai)*I(pi) [cc]这里乘上让r2new_aff[0]其实乘上的是t2/t1，是a21的系数
 			dp7[idx] = - hw*1;	//! 对 b 导
 			//* 残差对 i(旧状态) 逆深度求导
 			dd[idx] = dxInterp * dxdd  + dyInterp * dydd; 	//! dxfx * 1/Pz * (tx - u*tz) +　dyfy * 1/Pz * (tx - u*tz)
@@ -487,7 +496,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			JbBuffer_new[i][7] += dp7[idx]*dd[idx];
 			JbBuffer_new[i][8] += r[idx]*dd[idx];
 			JbBuffer_new[i][9] += dd[idx]*dd[idx];
-		}
+		}//[cc]结束8点的计算
 		
 		// 如果点的pattern(其中一个像素)超出图像,像素值无穷, 或者残差大于阈值
 		if(!isGood || energy > point->outlierTH*20)
@@ -506,6 +515,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 		//! 因为使用128位相当于每次加4个数, 因此i+=4, 妙啊!
 		// update Hessian matrix.
+		// [cc] d0-7是6个位姿相关和2个光度参数，最后一个r^2是为了使矩阵具有对称性, 注意这里没有逆深度，因为属于x_alpha，要被消元
 		for(int i=0;i+3<patternNum;i+=4)
 			acc9.updateSSE(
 					_mm_load_ps(((float*)(&dp0))+i),
@@ -519,6 +529,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 					_mm_load_ps(((float*)(&r))+i));
 
 		// 加0, 4, 8后面多余的值, 因为SSE2是以128为单位相加, 多余的单独加
+		//[cc] 这里是对其它一些不是4的倍数的pattern写的，在算完patternNum/4*4那么多的点之后要计算剩余的
 		for(int i=((patternNum>>2)<<2); i < patternNum; i++)
 			acc9.updateSingle(
 					(float)dp0[i],(float)dp1[i],(float)dp2[i],(float)dp3[i],
@@ -549,6 +560,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		else
 		{
 			// 最开始初始化都是成1
+			// [cc] 注意point->energy_new是一个Vec2f，第0个值在上面是累计了每个selected point周围8点的energy
 			point->energy_new[1] = (point->idepth_new-1)*(point->idepth_new-1);  //? 什么原理?
 			E.updateSingle((float)(point->energy_new[1])); 
 		}
@@ -583,16 +595,18 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 		//? 这又是啥??? 对逆深度的值进行加权? 深度值归一化?
 		// 前面Energe加上了（d-1)*(d-1), 所以dd = 1， r += (d-1)
+		// [cc]为了初始化时使得尺度收敛增加的两个能量项（在龚益群的ppt里有写）
 		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - 1); // r*dd
 		JbBuffer_new[i][9] += alphaOpt; // 对逆深度导数为1 // dd*dd
 
-		if(alphaOpt==0)
+		if(alphaOpt==0)  //当位移足够大时
 		{
+			// [cc]为了初始化时使得尺度收敛增加的两个能量项（在龚益群的ppt里有写）
 			JbBuffer_new[i][8] += couplingWeight*(point->idepth_new - point->iR);
 			JbBuffer_new[i][9] += couplingWeight;
 		}
 
-		JbBuffer_new[i][9] = 1/(1+JbBuffer_new[i][9]);  // 取逆是协方差，做权重
+		JbBuffer_new[i][9] = 1/(1+JbBuffer_new[i][9]);  // 取逆是协方差，做权重 [cc]看sc里的话就是前面乘的1/(Ja*Ja)
 		//* 9做权重, 计算的是舒尔补项!
 		//! dp*dd*(dd^2)^-1*dd*dp
 		acc9SC.updateSingleWeighted(
@@ -707,7 +721,7 @@ void CoarseInitializer::optReg(int lvl)
 		}
 
 		// 与最近点中位数进行加权获得新的iR
-		if(nnn > 2)
+		if(nnn > 2)  // [cc]重新统计了周围点是否好的结果
 		{
 			std::nth_element(idnn,idnn+nnn/2,idnn+nnn); // 获得中位数
 			point->iR = (1-regWeight)*point->idepth + regWeight*idnn[nnn/2];
@@ -767,20 +781,20 @@ void CoarseInitializer::propagateDown(int srcLvl)
 	assert(srcLvl>0);
 	// set idepth of target
 
-	int nptst= numPoints[srcLvl-1]; // 当前层的点数目
-	Pnt* ptss = points[srcLvl];  // 当前层+1, 上一层的点集
-	Pnt* ptst = points[srcLvl-1]; // 当前层点集
+	int nptst= numPoints[srcLvl-1]; // 当前层的点数目  [cc]srcLvl是currLvl+1的结果，所以srcLvl才是当前层
+	Pnt* ptss = points[srcLvl];  // 当前层+1, 上一层的点集  source
+	Pnt* ptst = points[srcLvl-1]; // 当前层点集   target
 
 	for(int i=0;i<nptst;i++)
 	{
 		Pnt* point = ptst+i;  // 遍历当前层的点
-		Pnt* parent = ptss+point->parent;  // 找到当前点的parrent
+		Pnt* parent = ptss+point->parent;  // 找到当前点的parent [cc]这个值是父亲节点在src层的idx = (x+y*w)
 
 		if(!parent->isGood || parent->lastHessian < 0.1) continue;
 		if(!point->isGood)
 		{
 			// 当前点不好, 则把父点的值直接给它, 并且置位good
-			point->iR = point->idepth = point->idepth_new = parent->iR;
+			point->iR = point->idepth = point->idepth_new = parent->iR;  //[cc]iR变量相当于是逆深度的真值
 			point->isGood=true;
 			point->lastHessian=0;
 		}
@@ -794,6 +808,8 @@ void CoarseInitializer::propagateDown(int srcLvl)
 	}
 	//? 为什么在这里又更新了iR, 没有更新 idepth 
 	// 感觉更多的是考虑附近点的平滑效果
+	//[cc]将所有点的iR设置为其在neighbour逆深度的中位数
+	//[cc]在优化的过程中，使用这个值计算逆深度误差，效果是画面中的逆深度平滑
 	optReg(srcLvl-1); // 当前层
 }
 
@@ -832,21 +848,23 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 	PixelSelector sel(w[0],h[0]); // 像素选择
 
 	float* statusMap = new float[w[0]*h[0]];
-	bool* statusMapB = new bool[w[0]*h[0]];
+	bool* statusMapB = new bool[w[0]*h[0]];  // 该点是否选中的status图
 
 	float densities[] = {0.03,0.05,0.15,0.5,1}; // 不同层取得点密度
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 //[ ***step 2*** ] 针对不同层数选择大梯度像素, 第0层比较复杂1d, 2d, 4d大小block来选择3个层次的像素
+//[cc] 之所以要扩大block size来反复选取像素点，是为了能选出那些有较弱梯度的点/更多的点
 		sel.currentPotential = 3; // 设置网格大小，3*3大小格
 		int npts; // 选择的像素数目
-		if(lvl == 0) // 第0层提取特征像素
+		if(lvl == 0) // 第0层提取特征像素, statusMap每个像素的值会变成1, 2 or 4
 			npts = sel.makeMaps(firstFrame, statusMap,densities[lvl]*w[0]*h[0],1,false,2);
 		else  // 其它层则选出goodpoints
 			npts = makePixelStatus(firstFrame->dIp[lvl], statusMapB, w[lvl], h[lvl], densities[lvl]*w[0]*h[0]);
 
 
 		// 如果点非空, 则释放空间, 创建新的
+		// [cc] 每一层上的点类，是第一帧提取出来的，这一步在做清空吧？
 		if(points[lvl] != 0) delete[] points[lvl];
 		points[lvl] = new Pnt[npts];
 
@@ -861,27 +879,30 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 		{
 			//if(x==2) printf("y=%d!\n",y);
 			// 如果是被选中的像素
+			//[cc] 如果不是第一层并且相应的statrusMapB值为True
+			//     或者是第一层，并且statusMap的值不为0
 			if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0))
 			{
 				//assert(patternNum==9);
 				pl[nl].u = x+0.1;   //? 加0.1干啥
 				pl[nl].v = y+0.1;
-				pl[nl].idepth = 1;
-				pl[nl].iR = 1;
+				pl[nl].idepth = 1;  // 逆深度初始化为1
+				pl[nl].iR = 1;      // 逆深度的期望值初始化为1
 				pl[nl].isGood=true;
 				pl[nl].energy.setZero();
 				pl[nl].lastHessian=0;
 				pl[nl].lastHessian_new=0;
-				pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];
+				pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];  // 第0层提取的是1, 2, 4, 对应d, 2d, 4d; 其它层是1
 
 				Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl]; // 该像素梯度
 				float sumGrad2=0;
 				// 计算pattern内像素梯度和
+				// [cc] patternP就是第8种
 				for(int idx=0;idx<patternNum;idx++)
 				{
 					int dx = patternP[idx][0]; // pattern 的偏移
 					int dy = patternP[idx][1];
-					float absgrad = cpt[dx + dy*w[lvl]].tail<2>().squaredNorm();
+					float absgrad = cpt[dx + dy*w[lvl]].tail<2>().squaredNorm(); //[cc]将该像素做偏移之后取值
 					sumGrad2 += absgrad;
 				}
 
@@ -929,20 +950,21 @@ void CoarseInitializer::resetPoints(int lvl)
 		pts[i].idepth_new = pts[i].idepth;
 
 		// 如果是最顶层, 则使用周围点平均值来重置
+		// [cc]应该说是最底层吧？及pyrLevelUsed-1层
 		if(lvl==pyrLevelsUsed-1 && !pts[i].isGood)
 		{
 			float snd=0, sn=0;
 			for(int n = 0;n<10;n++)
 			{
 				if(pts[i].neighbours[n] == -1 || !pts[pts[i].neighbours[n]].isGood) continue;
-				snd += pts[pts[i].neighbours[n]].iR;
+				snd += pts[pts[i].neighbours[n]].iR; // [cc]周围点的iR之和
 				sn += 1;
 			}
 
 			if(sn > 0)
 			{
 				pts[i].isGood=true;
-				pts[i].iR = pts[i].idepth = pts[i].idepth_new = snd/sn;
+				pts[i].iR = pts[i].idepth = pts[i].idepth_new = snd/sn;  //[cc]初始化为周围点iR的值的平均值
 			}
 		}
 	}
@@ -960,10 +982,12 @@ void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
 	{
 		if(!pts[i].isGood) continue;
 
-		//! dd*r + (dp*dd)^T*delta_p 
+		//! dd*r + (dp*dd)^T*delta_p
+		//[cc] b = -(g_a - H_ab * x_b)  其中 JbBuffer[i][8] = -g_a
 		float b = JbBuffer[i][8] + JbBuffer[i].head<8>().dot(inc);
 		//! dd * delta_d = dd*r - (dp*dd)^T*delta_p = b 
 		//! delta_d = b * dd^-1
+		//[cc] x_a = H_aa^-1 * (g_a - H_ab*x_b)
 		float step = - b * JbBuffer[i][9] / (1+lambda);
 
 
@@ -1076,7 +1100,7 @@ void CoarseInitializer::makeNN()
 		for(int i=0;i<npts;i++)
 		{
 			//resultSet.init(pts[i].neighbours, pts[i].neighboursDist );
-			resultSet.init(ret_index, ret_dist);
+			resultSet.init(ret_index, ret_dist); // 初始化成员指针
 			Vec2f pt = Vec2f(pts[i].u,pts[i].v); // 当前点
 			// 使用建立的KDtree, 来查询最近邻
 			indexes[lvl]->findNeighbors(resultSet, (float*)&pt, nanoflann::SearchParams());

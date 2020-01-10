@@ -232,7 +232,7 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	{
 		for(int i=0; i<wh;i++)
 		{
-			data[i] = factor*image_in[i];
+			data[i] = factor*image_in[i];  // factor default value is 1
 		}
 		output->exposure_time = exposure_time;
 		output->timestamp = 0;
@@ -241,13 +241,13 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	{
 		for(int i=0; i<wh;i++)
 		{
-			data[i] = G[image_in[i]]; // 去掉响应函数
+			data[i] = G[image_in[i]]; // 去掉响应函数  G^{-1}(I(x)) = t*B(x)*V(x)
 		}
 
 		if(setting_photometricCalibration==2) // 去掉衰减系数
 		{
 			for(int i=0; i<wh;i++)
-				data[i] *= vignetteMapInv[i];
+				data[i] *= vignetteMapInv[i];  // I` = t*B(x) = G^{-1}(I(x)) / V(x)
 		}
 
 		output->exposure_time = exposure_time; // 设置曝光时间
@@ -388,6 +388,7 @@ Undistort* Undistort::getUndistorterForFile(std::string configFilename, std::str
 }
 
 //* 得到光度矫正类
+//* gamma file is the noise image
 void Undistort::loadPhotometricCalibration(std::string file, std::string noiseImage, std::string vignetteImage)
 {
 	photometricUndist = new PhotometricUndistorter(file, noiseImage, vignetteImage,getOriginalSize()[0], getOriginalSize()[1]);
@@ -406,7 +407,7 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 //[ ***step 1*** ] 去除光度参数的影响
 	photometricUndist->processFrame<T>(image_raw->data, exposure, factor); // 去除光度参数影响
 	ImageAndExposure* result = new ImageAndExposure(w, h, timestamp);
-	photometricUndist->output->copyMetaTo(*result); // 只复制了曝光时间
+	photometricUndist->output->copyMetaTo(*result); // 只复制了曝光时间，copyMetaTo是ImageAndExposure的“浅拷贝”
 
 	if (!passthrough)
 	{
@@ -859,6 +860,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
         printf("Out: No Rectification\n");
 	}
 	//? 这啥参数呢...
+	//[cc] l3行不知道哪里来的五个参数，tum_mono_vo里有，似乎是对于缩放后的比例的图的fx,fy,cx,cy，应该是作者自己算的
 	else if(std::sscanf(l3.c_str(), "%f %f %f %f %f", &outputCalibration[0], &outputCalibration[1], &outputCalibration[2], &outputCalibration[3], &outputCalibration[4]) == 5)
 	{
 		printf("Out: %f %f %f %f %f\n",
@@ -932,6 +934,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
         }
 
 		// 相对于长宽的比例值（TUMmono这样）
+		// [cc] 在计算K的时候用的是第三行的fx, fy, cx, cy值？？
 		K.setIdentity();
         K(0,0) = outputCalibration[0] * w;
         K(1,1) = outputCalibration[1] * h;

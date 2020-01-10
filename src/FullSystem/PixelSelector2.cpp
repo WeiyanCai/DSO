@@ -46,7 +46,7 @@ PixelSelector::PixelSelector(int w, int h)
 
 	currentPotential=3;
 
-	// 32*32个块进行计算阈值
+	//[cc] (w/32)*(h/32)个块进行计算阈值
 	gradHist = new int[100*(1+w/32)*(1+h/32)];
 	ths = new float[(w/32)*(h/32)+100];
 	thsSmoothed = new float[(w/32)*(h/32)+100];
@@ -102,7 +102,7 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
 			{
 				int it = i+32*x; // 该格里第(j,i)像素的整个图像坐标
 				int jt = j+32*y;
-				if(it>w-2 || jt>h-2 || it<1 || jt<1) continue; //内
+				if(it>w-2 || jt>h-2 || it<1 || jt<1) continue; //内 [cc]留出1格的border
 				int g = sqrtf(map0[i+j*w]); // 梯度平方和开根号
 				if(g>48) g=48; //? 为啥是48这个数，因为一共分为了50格
 				hist0[g+1]++; // 1-49 存相应梯度个数
@@ -148,14 +148,16 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
  * @ function:
  * 
  * @ param: 	fh				帧Hessian数据结构
- * @			map_out			选出的地图点
- * @			density		 	每一金字塔层要的点数(密度)
+ * @			map_out			选出的地图点               [cc]外面调用的statusMap
+ * @			density		 	每一金字塔层要的点数(密度)   [cc]外层的 density[lvl]*w[0]*h[0]
  * @			recursionsLeft	最大递归次数
  * @			plot			画图
  * @			thFactor		阈值因子
  * @
  * @ note:		使用递归
  *******************************/
+// [cc] makemaps在setFirst和makeNewTraces的时候用到
+// 对于高层，选点是直接选grid中梯度最大的点makePixelStatus，只在setFirst的时候用
 int PixelSelector::makeMaps(
 		const FrameHessian* const fh,
 		float* map_out, float density, int recursionsLeft, bool plot, float thFactor)
@@ -206,7 +208,7 @@ int PixelSelector::makeMaps(
 
 		// sub-select!
 		numHave = n[0]+n[1]+n[2]; // 选择得到的点
-		quotia = numWant / numHave;  // 得到的 与 想要的 比例
+		quotia = numWant / numHave;  // 得到的 与 想要的 比例, 找到的点越多，这个比例就会越小
 
 //[ ***step 3*** ] 计算新的采像素点的, 范围大小, 相当于动态网格了, pot越小取得点越多
 		// by default we want to over-sample by 40% just to be sure.
@@ -215,7 +217,8 @@ int PixelSelector::makeMaps(
 		if(idealPotential<1) idealPotential=1;
 
 //[ ***step 4*** ] 想要的数目和已经得到的数目, 大于或小于0.25都会重新采样一次
-		if( recursionsLeft>0 && quotia > 1.25 && currentPotential>1)
+//[cc]如过recursionLeft大于0，判断quotia如果<0.25 or >1.25就要对步长pot迭代调整直到迭代次数到达极限或已经选出合适的点
+		if( recursionsLeft>0 && quotia > 1.25 && currentPotential>1) // quotia大意味着numHave少
 		{
 			//re-sample to get more points!
 			// potential needs to be smaller
@@ -260,7 +263,7 @@ int PixelSelector::makeMaps(
 		{
 			if(map_out[i] != 0)
 			{
-				if(randomPattern[rn] > charTH )
+				if(randomPattern[rn] > charTH ) //[cc]??
 				{
 					map_out[i]=0;
 					numHaveSub--;
@@ -300,11 +303,11 @@ int PixelSelector::makeMaps(
 			for(int x=0;x<w;x++)
 			{
 				int i=x+y*w;
-				if(map_out[i] == 1)
+				if(map_out[i] == 1)  // 1指的是第0层选的，指的是d
 					img.setPixelCirc(x,y,Vec3b(0,255,0));
-				else if(map_out[i] == 2)
+				else if(map_out[i] == 2)  // 2指的是第1层选的，指的是2d
 					img.setPixelCirc(x,y,Vec3b(255,0,0));
-				else if(map_out[i] == 4)
+				else if(map_out[i] == 4)  // 4指的是第2层选的，指的是4d
 					img.setPixelCirc(x,y,Vec3b(0,0,255));
 			}
 		IOWrap::displayImage("Selector Pixels", &img);
@@ -333,7 +336,7 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 	// 等价const Eigen::Vector3f * const
 	Eigen::Vector3f const * const map0 = fh->dI;
 
-	// 0, 1, 2层的梯度平方和
+	// 金字塔0, 1, 2层的梯度平方和
 	float * mapmax0 = fh->absSquaredGrad[0];
 	float * mapmax1 = fh->absSquaredGrad[1];
 	float * mapmax2 = fh->absSquaredGrad[2];
@@ -433,7 +436,7 @@ Eigen::Vector3i PixelSelector::select(const FrameHessian* const fh,
 					if(ag0 > pixelTH0*thFactor)
 					{
 						Vec2f ag0d = map0[idx].tail<2>();  // 后两位是图像导数
-						float dirNorm = fabsf((float)(ag0d.dot(dir2)));   // 以这个方向上的梯度来判断
+						float dirNorm = fabsf((float)(ag0d.dot(dir2)));   // 以这个方向上的梯度来判断 [cc] dx,dy投影到该方向上
 						if(!setting_selectDirectionDistribution) dirNorm = ag0;
 
 						if(dirNorm > bestVal2) // 取梯度最大的

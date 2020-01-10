@@ -69,7 +69,7 @@ public:
 	float parentDist;			//!< 上一层中与父节点的距离
 
 	// idx (x+y*w) of up to 10 nearest points in pixel space.
-	int neighbours[10];			//!< 图像中离该点最近的10个点
+	int neighbours[10];			//!< 图像中离该点最近的10个点 [cc]makeNN中求得的
 	float neighboursDist[10];   //!< 最近10个点的距离
 
 	float my_type; 				//!< 第0层提取是1, 2, 4, 对应d, 2d, 4d, 其它层是1
