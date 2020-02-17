@@ -294,9 +294,8 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 	AffLight aff_last_2_l = AffLight(0,0);
 //[ ***step 1*** ] 设置不同的运动状态
 	std::vector<SE3,Eigen::aligned_allocator<SE3>> lastF_2_fh_tries;
-	printf("size: %d \n", lastF_2_fh_tries.size());
 	if(allFrameHistory.size() == 2)
-		for(unsigned int i=0;i<lastF_2_fh_tries.size();i++) lastF_2_fh_tries.push_back(SE3());  //? 这个size()不应该是0么
+		for(unsigned int i=0;i<lastF_2_fh_tries.size();i++) lastF_2_fh_tries.emplace_back(SE3());  //? 这个size()不应该是0么
 	else
 	{
 		FrameShell* slast = allFrameHistory[allFrameHistory.size()-2];   // 上一帧
@@ -317,7 +316,7 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 		lastF_2_fh_tries.push_back(fh_2_slast.inverse() * fh_2_slast.inverse() * lastF_2_slast);	// assume double motion (frame skipped)
 		lastF_2_fh_tries.push_back(SE3::exp(fh_2_slast.log()*0.5).inverse() * lastF_2_slast); // assume half motion.
 		lastF_2_fh_tries.push_back(lastF_2_slast); // assume zero motion.
-		lastF_2_fh_tries.push_back(SE3()); // assume zero motion FROM KF.
+		lastF_2_fh_tries.emplace_back(SE3()); // assume zero motion FROM KF.
 
 		//! 尝试不同的旋转变动
 		// just try a TON of different initializations (all rotations). In the end,
@@ -353,13 +352,14 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 			lastF_2_fh_tries.push_back(fh_2_slast.inverse() * lastF_2_slast * SE3(Sophus::Quaterniond(1,rotDelta,rotDelta,rotDelta), Vec3(0,0,0)));	// assume constant motion.
 		}
 
-		if(!slast->poseValid || !sprelast->poseValid || !lastF->shell->poseValid) // 有不和法的
+		if(!slast->poseValid || !sprelast->poseValid || !lastF->shell->poseValid) // 有不合法的
 		{
 			lastF_2_fh_tries.clear();
 			lastF_2_fh_tries.push_back(SE3());
 		}
 	}
 
+	std::cout << "lastF_2_fh_tries size = " << lastF_2_fh_tries.size() << std::endl;
 
 	Vec3 flowVecs = Vec3(100,100,100);
 	SE3 lastF_2_fh = SE3();
@@ -457,7 +457,9 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 		coarseTracker->firstCoarseRMSE = achievedRes[0];  // 第一次跟踪的平均能量值
 
     if(!setting_debugout_runquiet)
-        printf("Coarse Tracker tracked ab = %f %f (exp %f). Res %f!\n", aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0]);
+//        printf("Coarse Tracker tracked ab = %f %f (exp %f). Res %f!\n", aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0]);
+		printf("[Coarse Tracker] id = %i, timestamp = %f,  tracked ab = %f %f (exp %f). Res %f, tryIterations = %i!\n",
+				fh->shell->id, fh->shell->timestamp, aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0], tryIterations);
 
 
 
@@ -513,14 +515,14 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 			trace_total++;
 		}
 	}
-//	printf("ADD: TRACE: %'d points. %'d (%.0f%%) good. %'d (%.0f%%) skip. %'d (%.0f%%) badcond. %'d (%.0f%%) oob. %'d (%.0f%%) out. %'d (%.0f%%) uninit.\n",
-//			trace_total,
-//			trace_good, 100*trace_good/(float)trace_total,
-//			trace_skip, 100*trace_skip/(float)trace_total,
-//			trace_badcondition, 100*trace_badcondition/(float)trace_total,
-//			trace_oob, 100*trace_oob/(float)trace_total,
-//			trace_out, 100*trace_out/(float)trace_total,
-//			trace_uninitialized, 100*trace_uninitialized/(float)trace_total);
+	printf("ADD: TRACE: %'d points. %'d (%.0f%%) good. %'d (%.0f%%) skip. %'d (%.0f%%) badcond. %'d (%.0f%%) oob. %'d (%.0f%%) out. %'d (%.0f%%) uninit.\n",
+			trace_total,
+			trace_good, 100*trace_good/(float)trace_total,
+			trace_skip, 100*trace_skip/(float)trace_total,
+			trace_badcondition, 100*trace_badcondition/(float)trace_total,
+			trace_oob, 100*trace_oob/(float)trace_total,
+			trace_out, 100*trace_out/(float)trace_total,
+			trace_uninitialized, 100*trace_uninitialized/(float)trace_total);
 }
 
 
@@ -863,8 +865,6 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	fh->ab_exposure = image->exposure_time;
     fh->makeImages(image->image, &Hcalib);  // 构造 dl，梯度图像
 
-
-
 	//[ ***step 4*** ] 如果未进行初始化，就进行初始化
 	if(!initialized)
 	{
@@ -872,17 +872,21 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 		//[ ***step 4.1*** ] 加入第一帧
 		if(coarseInitializer->frameID<0)	// first frame set. fh is kept by coarseInitializer.
 		{
+			std::cout << "coarseInitializer set first frame" << std::endl;
 			coarseInitializer->setFirst(&Hcalib, fh);
 		}
 		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
 		{
 		//[ ***step 4.2*** ] 跟踪成功, 完成初始化
+			std::cout << "tracking succeed, now do initializeFromInitializer" << std::endl;
+
 			initializeFromInitializer(fh);  // 做一系列初始化之后的事情
 			lock.unlock();
 			deliverTrackedFrame(fh, true);
 		}
 		else
 		{
+			std::cout << "fail to initialize, delete current frame" << std::endl;
 			// if still initializing
 			fh->shell->poseValid = false;  // 如果用当前帧初始化失败，就删除当前帧
 			delete fh;
@@ -893,7 +897,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	{
 //[ ***step 5*** ] 如果已经初始化过了，对新来的帧进行跟踪, 得到位姿光度, 判断跟踪状态
 		// =========================== SWAP tracking reference?. =========================
-		if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)
+		if(coarseTracker_forNewKF->refFrameID > coarseTracker->refFrameID)  //[cc] coarseTracker_forNewKF as ref, coarseTracker as current
 		{
 			// 交换参考帧和当前帧的coarseTracker
 			boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
@@ -915,6 +919,8 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 			// 插入关键帧的条件： 1）历史库中数量为1；2）或者，当前帧距离历史库中最后一帧的时间超过 0.95*setting_keyframesPerSecond
 			needToMakeKF = allFrameHistory.size()== 1 ||
 					(fh->shell->timestamp - allKeyFramesHistory.back()->timestamp) > 0.95f/setting_keyframesPerSecond;
+
+			std::cout << "setting_keyframesPerSecond > 0, needToMakeKF = " << needToMakeKF << std::endl;
 		}
 		else  // 如果没有设置这个参数
 		{
@@ -929,6 +935,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					setting_kfGlobalWeight*setting_maxAffineWeight * fabs(logf((float)refToFh[0])) > 1 ||		// 光度变化大
 					2*coarseTracker->firstCoarseRMSE < tres[0];		// 误差能量变化太大(最初的两倍)
 
+			std::cout << "setting_keyframesPerSecond <= 0, needToMakeKF = " << needToMakeKF << std::endl;
 		}
 
 
@@ -1373,7 +1380,7 @@ void FullSystem::makeNewTraces(FrameHessian* newFrame, float* gtDepth)
 		else newFrame->immaturePoints.push_back(impt);
 
 	}
-	//printf("MADE %d IMMATURE POINTS!\n", (int)newFrame->immaturePoints.size());
+	printf("[makeNewTraces] MADE %d IMMATURE POINTS!\n", (int)newFrame->immaturePoints.size());
 
 }
 

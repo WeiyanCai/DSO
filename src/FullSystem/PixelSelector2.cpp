@@ -26,7 +26,8 @@
  
 // 
 
-
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/features2d.hpp>
 
 #include "util/NumType.h"
 #include "IOWrapper/ImageDisplay.h"
@@ -148,15 +149,15 @@ void PixelSelector::makeHists(const FrameHessian* const fh)
  * @ function:
  * 
  * @ param: 	fh				帧Hessian数据结构
- * @			map_out			选出的地图点               [cc]外面调用的statusMap
+ * @			map_out			选出的地图点               [cc]初始化seetFirst时外面调用的statusMap，makeKeyFrame时makeNewTraces的selectionMap(FullSystem的成员）
  * @			density		 	每一金字塔层要的点数(密度)   [cc]外层的 density[lvl]*w[0]*h[0]
- * @			recursionsLeft	最大递归次数
- * @			plot			画图
- * @			thFactor		阈值因子
+ * @			recursionsLeft	最大递归次数               [cc]默认是1
+ * @			plot			画图						 [cc]默认是false
+ * @			thFactor		阈值因子					 [cc]默认是1
  * @
  * @ note:		使用递归
  *******************************/
-// [cc] makemaps在setFirst和makeNewTraces的时候用到
+// [cc] makeMaps在setFirst和makeNewTraces的时候用到
 // 对于高层，选点是直接选grid中梯度最大的点makePixelStatus，只在setFirst的时候用
 int PixelSelector::makeMaps(
 		const FrameHessian* const fh,
@@ -178,6 +179,7 @@ int PixelSelector::makeMaps(
 //			float v = fh->dI[i][0]*0.8;
 //			img8u.at<uchar>(i) = (!std::isfinite(v) || v>255) ? 255 : v;
 //		}
+//		//[cc]void FAST(InputArray image, vector<KeyPoint>& keypoints, int threshold, bool nonmaxSuppression=true)
 //		cv::FAST(img8u, pts, setting_pixelSelectionUseFast, true);
 //		for(unsigned int i=0;i<pts.size();i++)
 //		{
@@ -191,6 +193,31 @@ int PixelSelector::makeMaps(
 //		quotia = numWant / numHave;
 //	}
 //	else
+//	if(true)
+//	{
+//		memset(map_out, 0, sizeof(float)*wG[0]*hG[0]);
+//		std::vector<cv::KeyPoint> pts;
+//		cv::Mat img8u(hG[0],wG[0],CV_8U);
+//		for(int i=0;i<wG[0]*hG[0];i++)
+//		{
+//			float v = fh->dI[i][0]*0.8;
+//			img8u.at<uchar>(i) = (!std::isfinite(v) || v>255) ? 255 : v;
+//		}
+//		//[cc]void FAST(InputArray image, vector<KeyPoint>& keypoints, int threshold, bool nonmaxSuppression=true)
+//		cv::FAST(img8u, pts, 10, true);
+//		for(unsigned int i=0;i<pts.size();i++)
+//		{
+//			int x = pts[i].pt.x+0.5;
+//			int y = pts[i].pt.y+0.5;
+//			map_out[x+y*wG[0]]=1;
+//			numHave++;
+//		}
+//
+//		printf("FAST selection: got %f / %f!\n", numHave, numWant);
+//		quotia = numWant / numHave;
+//	}
+//	else
+
 	{
 
 
@@ -207,7 +234,7 @@ int PixelSelector::makeMaps(
 		Eigen::Vector3i n = this->select(fh, map_out,currentPotential, thFactor);
 
 		// sub-select!
-		numHave = n[0]+n[1]+n[2]; // 选择得到的点
+		numHave = n[0]+n[1]+n[2]; // 选择得到的点 [cc]在第0层选，但是会在0,1,2层图像梯度上选
 		quotia = numWant / numHave;  // 得到的 与 想要的 比例, 找到的点越多，这个比例就会越小
 
 //[ ***step 3*** ] 计算新的采像素点的, 范围大小, 相当于动态网格了, pot越小取得点越多
@@ -282,7 +309,8 @@ int PixelSelector::makeMaps(
 	currentPotential = idealPotential; //???
 
 	// 画出选择结果
-	if(plot)
+	//if(plot)
+	if(true)
 	{
 		int w = wG[0];
 		int h = hG[0];
@@ -296,7 +324,7 @@ int PixelSelector::makeMaps(
 			if(c>255) c=255;
 			img.at(i) = Vec3b(c,c,c);
 		}
-		IOWrap::displayImage("Selector Image", &img);
+//		IOWrap::displayImage("Selector Image", &img);
 
 		// 安照不同层数的像素, 画上不同颜色
 		for(int y=0; y<h;y++)
@@ -310,7 +338,15 @@ int PixelSelector::makeMaps(
 				else if(map_out[i] == 4)  // 4指的是第2层选的，指的是4d
 					img.setPixelCirc(x,y,Vec3b(0,0,255));
 			}
-		IOWrap::displayImage("Selector Pixels", &img);
+
+		{   //cc
+			auto image = cv::Mat(img.h, img.w, CV_8UC3, img.data);
+			cv::namedWindow("Test");
+			cv::imshow("Test", image);
+			cv::waitKey(10);
+		}
+
+//		IOWrap::displayImage("Selector Pixels", &img);
 	}
 
 	return numHaveSub;

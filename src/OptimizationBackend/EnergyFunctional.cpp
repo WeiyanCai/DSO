@@ -331,12 +331,12 @@ void EnergyFunctional::resubstituteFPt(
 		}
 
 		p->data->step = - b*p->HdiF; // 逆深度的增量
+//		std::cout << "b = " << b << ", " << p->HdiF << std::endl;
 		assert(std::isfinite(p->data->step));
 	}
 }
 
 //@ 也是求能量, 使用HM和bM求的, delta是绝对的
-
 double EnergyFunctional::calcMEnergyF()
 {
 

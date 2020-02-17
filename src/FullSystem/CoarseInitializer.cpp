@@ -281,7 +281,6 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 		snappedAt = frameID;  // 位移足够的帧数
 
 
-
     debugPlot(0,wraps);
 
 
