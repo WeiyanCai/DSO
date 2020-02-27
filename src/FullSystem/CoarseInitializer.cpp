@@ -37,6 +37,9 @@
 #include "FullSystem/PixelSelector2.h"
 #include "util/nanoflann.h"
 
+#include <opencv2/viz.hpp>
+#include <opencv2/core/eigen.hpp>
+
 
 #if !defined(__SSE3__) && !defined(__SSE2__) && !defined(__SSE1__)
 #include "SSE2NEON.h"
@@ -59,7 +62,7 @@ CoarseInitializer::CoarseInitializer(int ww, int hh) : thisToNext_aff(0,0), this
 
 	frameID=-1;
 	fixAffine=true;
-	printDebug=false;
+	printDebug=true;
 
 	//! 这是
 	wM.diagonal()[0] = wM.diagonal()[1] = wM.diagonal()[2] = SCALE_XI_ROT;
@@ -128,7 +131,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	// 从顶层开始估计
 	//[cc] 从最高层开始（应该是金字塔的底层吧？）
 	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)
-	{ 
+	{
 
 //[ ***step 3*** ] 使用计算过的上一层来初始化下一层
 		// 顶层未初始化到, reset来完成
@@ -170,10 +173,19 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			// 舒尔补, 边缘化掉逆深度状态
 			Hl -= Hsc*(1/(1+lambda)); // 因为dd必定是对角线上的, 所以也乘倒数
 			Vec8f bl = b - bsc*(1/(1+lambda));
+
+			// cclog
+//			std::cout << "0 Hl =\n" << Hl << std::endl;
+//			std::cout << "0 bl =\n" << bl << std::endl;
+
 			//? wM为什么这么乘, 它对应着状态的SCALE
 			//? (0.01f/(w[lvl]*h[lvl]))是为了减小数值, 更稳定?
 			Hl = wM * Hl * wM * (0.01f/(w[lvl]*h[lvl]));
 			bl = wM * bl * (0.01f/(w[lvl]*h[lvl]));
+
+			// cclog
+//			std::cout << "1 Hl =\n" << Hl << std::endl;
+//			std::cout << "1 bl =\n" << bl << std::endl;
 
 //[ ***step 5.2*** ] 求解增量
 			Vec8f inc;
@@ -184,6 +196,10 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			}
 			else
 				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b. = H^-1 * g  //[cc]之所以前面有负号是因为b是g被挪到左边的值
+
+			// cclog
+			printf("increment = (%f, %f, %f, %f, %f, %f, %f, %f)\n",
+			       inc(0), inc(1), inc(2), inc(3), inc(4), inc(5), inc(6), inc(7));
 
 //[ ***step 5.3*** ] 更新状态, doStep中更新逆深度
 			SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
@@ -223,8 +239,12 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			if(accept)
 			{
 				//? 这是啥   答：应该是位移足够大，才开始优化IR
+				// [cc]在calcResAndGS里做过判断了，如果前者>后者，就让前者=后者，所以这里才会判断相等
 				if(resNew[1] == alphaK*numPoints[lvl]) // 当 alphaEnergy > alphaK*npts
+				{
 					snapped = true;
+				}
+
 				H = H_new;
 				b = b_new;
 				Hsc = Hsc_new;
@@ -275,10 +295,74 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 
 	frameID++;
-	if(!snapped) snappedAt=0; 
+	if(!snapped) snappedAt=0;
 
 	if(snapped && snappedAt==0)
 		snappedAt = frameID;  // 位移足够的帧数
+
+		if (snapped && frameID > snappedAt+5) {
+			/* Viz */
+			auto viz               = cv::viz::Viz3d("Test");
+			auto world_coordinate  = cv::viz::WCoordinateSystem(0.08);
+			auto camera_coordinate = cv::viz::WCoordinateSystem(0.04);
+
+			auto trajectory = std::vector<cv::Point3f>();
+
+			{
+				{
+					auto viewer_pose        = cv::Point3d(0, 0, -1);
+					auto viewer_focal_point = cv::Point3d(0, 0, 0);
+					auto viewer_y_dir       = cv::Point3d(0, 1, 0);
+					auto pose               = cv::Affine3d(
+							cv::viz::makeCameraPose(viewer_pose, viewer_focal_point, viewer_y_dir));
+
+					viz.setViewerPose(pose);
+				}
+
+				world_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 2.0);
+				camera_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 1.0);
+
+				viz.showWidget("World", world_coordinate);
+				viz.showWidget("Camera", camera_coordinate);
+			}
+
+			{
+				SE3     T_12 = thisToNext.inverse();
+				cv::Mat cv_R_wc2, cv_t_wc2;
+				cv::eigen2cv(T_12.rotationMatrix(), cv_R_wc2);
+				cv::eigen2cv(T_12.translation(), cv_t_wc2);
+
+				auto pose = cv::Affine3f(cv::Affine3f::Mat3(cv_R_wc2), cv::Affine3f::Vec3(cv_t_wc2));
+
+				viz.setWidgetPose("Camera", pose);
+			}
+
+			int npts = numPoints[0];
+			Pnt* ptsl = points[0];
+
+			auto cloud = cv::Mat(1, npts, CV_32FC3);
+			auto color = cv::Mat(1, npts, CV_8UC3);
+
+			auto* cloud_ptr = cloud.ptr<cv::Point3f>();
+			auto* color_ptr = color.ptr<std::array<uint8_t, 3>>();
+
+			for(int i=0;i<npts;i++)
+			{
+				Pnt* point = ptsl+i;
+				Vec3f Pw = (Ki[0].cast<float>()) * Eigen::Vector3f(point->u, point->v, 1);
+				Pw = Pw / point->iR;
+				cloud_ptr[i] = {Pw.x(), Pw.y(), 1 / point->iR};
+
+				auto gray = uchar {255};
+				color_ptr[i] = {gray, gray, gray};
+			}
+
+			viz.showWidget("Point Cloud", cv::viz::WCloud(cloud, color));
+
+			while (true) {
+				viz.spinOnce(1, true);
+			}
+		}
 
 
     debugPlot(0,wraps);
@@ -349,7 +433,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 {
 	int wl = w[lvl], hl = h[lvl];
 	// 当前层图像及梯度
-	Eigen::Vector3f* colorRef = firstFrame->dIp[lvl];  
+	Eigen::Vector3f* colorRef = firstFrame->dIp[lvl];
 	Eigen::Vector3f* colorNew = newFrame->dIp[lvl];
 
 	//! 旋转矩阵R * 内参矩阵K_inv
@@ -415,7 +499,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			// 像素坐标pj
 			float Ku = fxl * u + cxl;
 			float Kv = fyl * v + cyl;
-			// dpi/pz' 
+			// dpi/pz'
 			float new_idepth = point->idepth_new/pt[2]; // 新一帧上的逆深度
 
 			// 落在边缘附近，深度小于0, 则不好
@@ -445,7 +529,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			// r = I2' - a21 * I1 - b21 = I2' - I2
 			float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
 			// Huber权重
-			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual); 
+			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual);
 			// huberweight * (2-huberweight) = Objective Function
 			// robust 权重和函数之间的关系
 			energy += hw *residual*residual*(2-hw);  //[cc] 在林突破的CSDN博客里有较好的解释
@@ -496,7 +580,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			JbBuffer_new[i][8] += r[idx]*dd[idx];
 			JbBuffer_new[i][9] += dd[idx]*dd[idx];
 		}//[cc]结束8点的计算
-		
+
 		// 如果点的pattern(其中一个像素)超出图像,像素值无穷, 或者残差大于阈值
 		if(!isGood || energy > point->outlierTH*20)
 		{
@@ -561,7 +645,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			// 最开始初始化都是成1
 			// [cc] 注意point->energy_new是一个Vec2f，第0个值在上面是累计了每个selected point周围8点的energy
 			point->energy_new[1] = (point->idepth_new-1)*(point->idepth_new-1);  //? 什么原理?
-			E.updateSingle((float)(point->energy_new[1])); 
+			E.updateSingle((float)(point->energy_new[1]));
 		}
 	}
 	EAlpha.finish(); //! 只是计算位移是否足够大
@@ -595,6 +679,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		//? 这又是啥??? 对逆深度的值进行加权? 深度值归一化?
 		// 前面Energe加上了（d-1)*(d-1), 所以dd = 1， r += (d-1)
 		// [cc]为了初始化时使得尺度收敛增加的两个能量项（在龚益群的ppt里有写）
+		// [cc]当位移不够大时，alphaOpt = 0，即这里没有加任何东西
 		JbBuffer_new[i][8] += alphaOpt*(point->idepth_new - 1); // r*dd
 		JbBuffer_new[i][9] += alphaOpt; // 对逆深度导数为1 // dd*dd
 
@@ -618,7 +703,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 
 	//printf("nelements in H: %d, in E: %d, in Hsc: %d / 9!\n", (int)acc9.num, (int)E.num, (int)acc9SC.num*9);
 	H_out = acc9.H.topLeftCorner<8,8>();// / acc9.num;  		!dp^T*dp
-	b_out = acc9.H.topRightCorner<8,1>();// / acc9.num; 		!dp^T*r 
+	b_out = acc9.H.topRightCorner<8,1>();// / acc9.num; 		!dp^T*r
 	H_out_sc = acc9SC.H.topLeftCorner<8,8>();// / acc9.num; 	!(dp*dd)^T*(dd*dd)^-1*(dd*dp)
 	b_out_sc = acc9SC.H.topRightCorner<8,1>();// / acc9.num;	!(dp*dd)^T*(dd*dd)^-1*(dp^T*r)
 
@@ -692,7 +777,7 @@ void CoarseInitializer::optReg(int lvl)
 {
 	int npts = numPoints[lvl];
 	Pnt* ptsl = points[lvl];
-	
+
 	//* 位移不足够则设置iR是1
 	if(!snapped)
 	{
@@ -805,7 +890,7 @@ void CoarseInitializer::propagateDown(int srcLvl)
 			point->iR = point->idepth = point->idepth_new = newiR;
 		}
 	}
-	//? 为什么在这里又更新了iR, 没有更新 idepth 
+	//? 为什么在这里又更新了iR, 没有更新 idepth
 	// 感觉更多的是考虑附近点的平滑效果
 	//[cc]将所有点的iR设置为其在neighbour逆深度的中位数
 	//[cc]在优化的过程中，使用这个值计算逆深度误差，效果是画面中的逆深度平滑
@@ -984,7 +1069,7 @@ void CoarseInitializer::doStep(int lvl, float lambda, Vec8f inc)
 		//! dd*r + (dp*dd)^T*delta_p
 		//[cc] b = -(g_a - H_ab * x_b)  其中 JbBuffer[i][8] = -g_a
 		float b = JbBuffer[i][8] + JbBuffer[i].head<8>().dot(inc);
-		//! dd * delta_d = dd*r - (dp*dd)^T*delta_p = b 
+		//! dd * delta_d = dd*r - (dp*dd)^T*delta_p = b
 		//! delta_d = b * dd^-1
 		//[cc] x_a = H_aa^-1 * (g_a - H_ab*x_b)
 		float step = - b * JbBuffer[i][9] / (1+lambda);
@@ -1038,7 +1123,7 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 	// 求各层的K参数
 	for (int level = 1; level < pyrLevelsUsed; ++ level)
 	{
-		
+
 		w[level] = w[0] >> level;
 		h[level] = h[0] >> level;
 		fx[level] = fx[level-1] * 0.5;
@@ -1061,7 +1146,7 @@ void CoarseInitializer::makeK(CalibHessian* HCalib)
 
 
 
-//@ 生成每一层点的KDTree, 并用其找到邻近点集和父点 
+//@ 生成每一层点的KDTree, 并用其找到邻近点集和父点
 void CoarseInitializer::makeNN()
 {
 	const float NNDistFactor=0.05;
