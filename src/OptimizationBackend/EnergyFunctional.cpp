@@ -803,7 +803,7 @@ void EnergyFunctional::orthogonalize(VecX* b, MatXX* H)
 	MatXX Npi = svdNN.matrixU() * SNN.asDiagonal() * svdNN.matrixV().transpose(); 	// [dim] x 7.
 	//! Npi.transpose()是N的伪逆
 	MatXX NNpiT = N*Npi.transpose(); 	// [dim] x [dim].
-	MatXX NNpiTS = 0.5*(NNpiT + NNpiT.transpose());	// = N * (N' * N)^-1 * N'.
+	MatXX NNpiTS = 0.5*(NNpiT + NNpiT.transpose());	// = N * (N' * N)^-1 * N'. //[cc]calculate (NN`)T as 0.5*(NN` + (NN`)T)
 	
 //*****************add by gong********************
 	// std::vector<VecX> ns;
@@ -836,7 +836,7 @@ void EnergyFunctional::orthogonalize(VecX* b, MatXX* H)
 	//TODO 为什么这么做?
 	//* 把零空间从H和b中减去??? 以免乱飘?
 	if(b!=0) *b -= NNpiTS * *b;
-	if(H!=0) *H -= NNpiTS * *H * NNpiTS;
+	if(H!=0) *H -= NNpiTS * *H * NNpiTS;  //[cc]since already made NNpiTS = NNpiT
 
 	zero_x = *b;
 	for(int i=0; i<zero_x.cols(); i++)

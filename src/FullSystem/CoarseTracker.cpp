@@ -208,6 +208,7 @@ void CoarseTracker::makeCoarseDepthL0(std::vector<FrameHessian*> frameHessians)
 											// read values with weightSumsl>0, and write ones with weightSumsl<=0.
 			for(int i=w[lvl];i<wh;i++) // 上下各空一行
 			{
+
 				if(weightSumsl_bak[i] <= 0)
 				{
 					// 使用四个角上的点来填充没有深度的

@@ -125,6 +125,9 @@ void parseArgument(char* arg) {
 	float foption;
 	char  buf[1000];
 
+	Eigen::Vector2d a;
+	auto b = a * a;
+
 	if (1 == sscanf(arg, "sampleoutput=%d", &option)) {
 		if (option == 1) {
 			useSampleOutput = true;

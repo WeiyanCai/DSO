@@ -182,7 +182,7 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 	}
 
 	//? 为什么是这个值呢??? 0.75 - 1.5 
-	// 这个值是两个帧上深度的比值, 它的变化太大就是前后尺度变化太大了
+	// 这个值是两个帧上深度的比值, 它的变化太大就是前后尺度变化太大了 [cc] ptpMin[2] = s2 / s1 (两个帧上深度的比值)
 	// set OOB if scale change too big.
 	if(!(idepth_min<0 || (ptpMin[2]>0.75 && ptpMin[2]<1.5)))
 	{
@@ -330,7 +330,7 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 
 			if(!std::isfinite((float)hitColor[0])) {energy+=1e5; continue;}
 			float residual = hitColor[0] - (hostToFrame_affine[0] * color[idx] + hostToFrame_affine[1]);
-			float dResdDist = dx*hitColor[1] + dy*hitColor[2]; // 极线方向梯度
+			float dResdDist = dx*hitColor[1] + dy*hitColor[2]; // 极线方向梯度 [cc] drdlambda = (dI2 / du) * (du / dlambda), lambda指的是单目深度恢复论文中的视差参数
 			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual);
 
 			H += hw*dResdDist*dResdDist;

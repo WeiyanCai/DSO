@@ -73,7 +73,6 @@ public:
         }
 
 
-
         virtual void publishKeyframes( std::vector<FrameHessian*> &frames, bool final, CalibHessian* HCalib) override
         {
             for(FrameHessian* f : frames)

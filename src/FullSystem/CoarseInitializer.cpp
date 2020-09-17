@@ -94,7 +94,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 
 	//? 调参
-	alphaK = 2.5*2.5;//*freeDebugParam1*freeDebugParam1;
+	alphaK = 2.5*2.5;//*freeDebugParam1*freeDebugParam1; [cc] 理论上每个点的alpha_energy（平方）？
 	alphaW = 150*150;//*freeDebugParam2*freeDebugParam2;
 	regWeight = 0.8;//*freeDebugParam4;
 	couplingWeight = 1;//*freeDebugParam5;
@@ -290,8 +290,6 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 	for(int i=0;i<pyrLevelsUsed-1;i++)
 		propagateUp(i);
-
-
 
 
 	frameID++;

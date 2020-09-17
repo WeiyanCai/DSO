@@ -588,7 +588,7 @@ void FullSystem::activatePointsMT()
 //[ ***step 2*** ] 处理未成熟点, 激活/删除/跳过
 	for(FrameHessian* host : frameHessians)		// go through all active frames
 	{
-		if(host == newestHs) continue;
+		if(host == newestHs) continue; //[cc] except the current frame
 
 		SE3 fhToNew = newestHs->PRE_worldToCam * host->PRE_camToWorld;
 		// 第0层到1层
