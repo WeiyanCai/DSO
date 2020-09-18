@@ -30,7 +30,7 @@
  */
 
 #include "FullSystem/FullSystem.h"
- 
+
 #include "stdio.h"
 #include "util/globalFuncs.h"
 #include <Eigen/LU>
@@ -53,6 +53,8 @@
 #include "IOWrapper/Output3DWrapper.h"
 
 #include "util/ImageAndExposure.h"
+
+#include "util/PerfMonitor.h"
 
 #include <cmath>
 
@@ -170,7 +172,7 @@ FullSystem::FullSystem()
 
 	needNewKFAfter = -1;
 
-	linearizeOperation=true;
+	linearizeOperation=false;
 	runMapping=true;
 	mappingThread = boost::thread(&FullSystem::mappingLoop, this); // 建图线程单开
 	lastRefStopID=0;
@@ -359,7 +361,7 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 		}
 	}
 
-	std::cout << "lastF_2_fh_tries size = " << lastF_2_fh_tries.size() << std::endl;
+//	std::cout << "lastF_2_fh_tries size = " << lastF_2_fh_tries.size() << std::endl;
 
 	Vec3 flowVecs = Vec3(100,100,100);
 	SE3 lastF_2_fh = SE3();
@@ -367,11 +369,11 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 
 
 	//! as long as maxResForImmediateAccept is not reached, I'll continue through the options.
-	//! I'll keep track of the so-far best achieved residual for each level in achievedRes. 
+	//! I'll keep track of the so-far best achieved residual for each level in achievedRes.
 	//! 把到目前为止最好的残差值作为每一层的阈值
 	//! If on a coarse level, tracking is WORSE than achievedRes, we will not continue to save time.
 	//! 粗层的能量值大, 也不继续优化了, 来节省时间
-	 
+
 
 	Vec5 achievedRes = Vec5::Constant(NAN);
 	bool haveOneGood = false;
@@ -382,7 +384,7 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 //[ ***step 2*** ] 尝试不同的运动状态, 得到跟踪是否良好
 		AffLight aff_g2l_this = aff_last_2_l;  // 上一帧的赋值当前帧
 		SE3 lastF_2_fh_this = lastF_2_fh_tries[i];
-		
+
 		bool trackingIsGood = coarseTracker->trackNewestCoarse(
 				fh, lastF_2_fh_this, aff_g2l_this,
 				pyrLevelsUsed-1,
@@ -456,10 +458,10 @@ Vec4 FullSystem::trackNewCoarse(FrameHessian* fh)
 	if(coarseTracker->firstCoarseRMSE < 0)
 		coarseTracker->firstCoarseRMSE = achievedRes[0];  // 第一次跟踪的平均能量值
 
-    if(!setting_debugout_runquiet)
-//        printf("Coarse Tracker tracked ab = %f %f (exp %f). Res %f!\n", aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0]);
-		printf("[Coarse Tracker] id = %i, timestamp = %f,  tracked ab = %f %f (exp %f). Res %f, tryIterations = %i!\n",
-				fh->shell->id, fh->shell->timestamp, aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0], tryIterations);
+//    if(!setting_debugout_runquiet)
+////        printf("Coarse Tracker tracked ab = %f %f (exp %f). Res %f!\n", aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0]);
+//		printf("[Coarse Tracker] id = %i, timestamp = %f,  tracked ab = %f %f (exp %f). Res %f, tryIterations = %i!\n",
+//				fh->shell->id, fh->shell->timestamp, aff_g2l.a, aff_g2l.b, fh->ab_exposure, achievedRes[0], tryIterations); //[cc]
 
 
 
@@ -546,7 +548,7 @@ void FullSystem::activatePointsMT_Reductor(
 void FullSystem::activatePointsMT()
 {
 //[ ***step 1*** ] 阈值计算, 通过距离地图来控制数目
-	//currentMinActDist 初值为 2 
+	//currentMinActDist 初值为 2
 	//* 这太牛逼了.....参数
 	if(ef->nPoints < setting_desiredPointDensity*0.66)
 		currentMinActDist -= 0.8;
@@ -610,7 +612,7 @@ void FullSystem::activatePointsMT()
 				host->immaturePoints[i]=0; // 指针赋零
 				continue;
 			}
-			
+
 			//* 未成熟点的激活条件
 			// can activate only if this is true.
 			bool canActivate = (ph->lastTraceStatus == IPS_GOOD
@@ -843,6 +845,8 @@ void FullSystem::flagPointsForRemoval()
  *******************************/
 void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 {
+	auto perf = dso::PerfMonitor("Perf: FullSystem | addActiveFrame");
+
 	//[ ***step 1*** ] track线程锁
     if(isLost) return;
 	boost::unique_lock<boost::mutex> lock(trackMutex);
@@ -920,7 +924,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 			needToMakeKF = allFrameHistory.size()== 1 ||
 					(fh->shell->timestamp - allKeyFramesHistory.back()->timestamp) > 0.95f/setting_keyframesPerSecond;
 
-			std::cout << "setting_keyframesPerSecond > 0, needToMakeKF = " << needToMakeKF << std::endl;
+//			std::cout << "setting_keyframesPerSecond > 0, needToMakeKF = " << needToMakeKF << std::endl;
 		}
 		else  // 如果没有设置这个参数
 		{
@@ -935,7 +939,7 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 					setting_kfGlobalWeight*setting_maxAffineWeight * fabs(logf((float)refToFh[0])) > 1 ||		// 光度变化大
 					2*coarseTracker->firstCoarseRMSE < tres[0];		// 误差能量变化太大(最初的两倍)
 
-			std::cout << "setting_keyframesPerSecond <= 0, needToMakeKF = " << needToMakeKF << std::endl;
+//			std::cout << "setting_keyframesPerSecond <= 0, needToMakeKF = " << needToMakeKF << std::endl;
 		}
 
 
@@ -958,7 +962,7 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 {
 
 	//! 顺序执行
-	if(linearizeOperation) 
+	if(linearizeOperation)
 	{
 		if(goStepByStep && lastRefStopID != coarseTracker->refFrameID)
 		{
@@ -1008,6 +1012,8 @@ void FullSystem::mappingLoop()
 			if(!runMapping) return;
 		}
 
+		printf("mappingLoop, unmappedTrackedFrames.size = %ld\n", unmappedTrackedFrames.size());
+
 		FrameHessian* fh = unmappedTrackedFrames.front();
 		unmappedTrackedFrames.pop_front();
 
@@ -1022,8 +1028,10 @@ void FullSystem::mappingLoop()
 			continue;
 		}
 
-		if(unmappedTrackedFrames.size() > 3)
+		if(unmappedTrackedFrames.size() > 3) {
 			needToKetchupMapping=true;
+			printf("needToKetchupMapping, unmappedTrackedFrames.size = %ld\n", unmappedTrackedFrames.size());
+		}
 
 
 		if(unmappedTrackedFrames.size() > 0) // if there are other frames to tracke, do that first.
@@ -1099,6 +1107,7 @@ void FullSystem::makeNonKeyFrame( FrameHessian* fh)
 //@ 生成关键帧, 优化, 激活点, 提取点, 边缘化关键帧
 void FullSystem::makeKeyFrame( FrameHessian* fh)
 {
+	auto perf_all = dso::PerfMonitor("Perf: makeKeyFrame");
 
 //[ ***step 1*** ] 设置当前估计的fh的位姿, 光度参数
 	// needs to be set by mapping thread
@@ -1111,7 +1120,11 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	}
 
 //[ ***step 2*** ] 把这一帧来更新之前帧的未成熟点
-	traceNewCoarse(fh); // 更新未成熟点(深度未收敛的点)
+	{
+		auto perf = dso::PerfMonitor("Perf: makeKeyFrame::traceNewCoarse");
+		traceNewCoarse(fh); // 更新未成熟点(深度未收敛的点)
+	}
+
 
 	boost::unique_lock<boost::mutex> lock(mapMutex); // 建图锁
 
@@ -1161,9 +1174,13 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 	// =========================== OPTIMIZE ALL =========================
 
 	fh->frameEnergyTH = frameHessians.back()->frameEnergyTH;  // 这两个不是一个值么???
-	float rmse = optimize(setting_maxOptIterations);
 
+	float rmse;
 
+	{
+		auto perf = dso::PerfMonitor("Perf: makeKeyFrame | optimize");
+		rmse = optimize(setting_maxOptIterations);
+	}
 
 
 
@@ -1192,70 +1209,73 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 
     if(isLost) return;  // 优化后的能量函数太大, 认为是跟丢了
 
-
+    {
+	    auto perf = dso::PerfMonitor("Perf: makeKeyFrame | marginalization");
 
 //[ ***step 8*** ] 去除外点, 把最新帧设置为参考帧
 //TODO 是否可以更加严格一些
-	// =========================== REMOVE OUTLIER =========================
-	removeOutliers();
+			// =========================== REMOVE OUTLIER =========================
+			removeOutliers();
 
 
 
 
-	{
-		boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
-		coarseTracker_forNewKF->makeK(&Hcalib);  // 更新了内参, 因此重新make
-		coarseTracker_forNewKF->setCoarseTrackingRef(frameHessians);
+			{
+				boost::unique_lock<boost::mutex> crlock(coarseTrackerSwapMutex);
+				coarseTracker_forNewKF->makeK(&Hcalib);  // 更新了内参, 因此重新make
+				coarseTracker_forNewKF->setCoarseTrackingRef(frameHessians);
 
 
 
-        coarseTracker_forNewKF->debugPlotIDepthMap(&minIdJetVisTracker, &maxIdJetVisTracker, outputWrapper);
-        coarseTracker_forNewKF->debugPlotIDepthMapFloat(outputWrapper);
-	}
+				coarseTracker_forNewKF->debugPlotIDepthMap(&minIdJetVisTracker, &maxIdJetVisTracker, outputWrapper);
+				coarseTracker_forNewKF->debugPlotIDepthMapFloat(outputWrapper);
+			}
 
 
-	debugPlot("post Optimize");
+			debugPlot("post Optimize");
 
 
 
 
 
 //[ ***step 9*** ] 标记删除和边缘化的点, 并删除&边缘化
-	// =========================== (Activate-)Marginalize Points =========================
-	flagPointsForRemoval();
-	ef->dropPointsF();  // 扔掉drop的点
-	// 每次设置线性化点都会更新零空间
-	getNullspaces(
-			ef->lastNullspaces_pose,
-			ef->lastNullspaces_scale,
-			ef->lastNullspaces_affA,
-			ef->lastNullspaces_affB);
-	// 边缘化掉点, 加在HM, bM上
-	ef->marginalizePointsF();
+			// =========================== (Activate-)Marginalize Points =========================
+			flagPointsForRemoval();
+			ef->dropPointsF();  // 扔掉drop的点
+			// 每次设置线性化点都会更新零空间
+			getNullspaces(
+					ef->lastNullspaces_pose,
+					ef->lastNullspaces_scale,
+					ef->lastNullspaces_affA,
+					ef->lastNullspaces_affB);
+			// 边缘化掉点, 加在HM, bM上
+			ef->marginalizePointsF();
 
 
 //[ ***step 10*** ] 生成新的点
-	// =========================== add new Immature points & new residuals =========================
-	makeNewTraces(fh, 0);
+			// =========================== add new Immature points & new residuals =========================
+			makeNewTraces(fh, 0);
 
 
 
 
 
-    for(IOWrap::Output3DWrapper* ow : outputWrapper)
-    {
-        ow->publishGraph(ef->connectivityMap);
-        ow->publishKeyframes(frameHessians, false, &Hcalib);
+			for(IOWrap::Output3DWrapper* ow : outputWrapper)
+			{
+				ow->publishGraph(ef->connectivityMap);
+				ow->publishKeyframes(frameHessians, false, &Hcalib);
+			}
+
+
+
+			// =========================== Marginalize Frames =========================
+//[ ***step 11*** ] 边缘化掉关键帧
+			//* 边缘化一帧要删除or边缘化上面所有点
+			for(unsigned int i=0;i<frameHessians.size();i++)
+				if(frameHessians[i]->flaggedForMarginalization)
+				{marginalizeFrame(frameHessians[i]); i=0;}
     }
 
-
-
-	// =========================== Marginalize Frames =========================
-//[ ***step 11*** ] 边缘化掉关键帧
-	//* 边缘化一帧要删除or边缘化上面所有点
-	for(unsigned int i=0;i<frameHessians.size();i++)
-		if(frameHessians[i]->flaggedForMarginalization)
-			{marginalizeFrame(frameHessians[i]); i=0;}
 
 
 

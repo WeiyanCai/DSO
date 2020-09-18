@@ -37,8 +37,8 @@
 #include "FullSystem/PixelSelector2.h"
 #include "util/nanoflann.h"
 
-#include <opencv2/viz.hpp>
-#include <opencv2/core/eigen.hpp>
+//#include <opencv2/viz.hpp>
+//#include <opencv2/core/eigen.hpp>
 
 
 #if !defined(__SSE3__) && !defined(__SSE2__) && !defined(__SSE1__)
@@ -62,7 +62,7 @@ CoarseInitializer::CoarseInitializer(int ww, int hh) : thisToNext_aff(0,0), this
 
 	frameID=-1;
 	fixAffine=true;
-	printDebug=true;
+	printDebug=false;
 
 	//! 这是
 	wM.diagonal()[0] = wM.diagonal()[1] = wM.diagonal()[2] = SCALE_XI_ROT;
@@ -197,9 +197,9 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			else
 				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b. = H^-1 * g  //[cc]之所以前面有负号是因为b是g被挪到左边的值
 
-			// cclog
-			printf("increment = (%f, %f, %f, %f, %f, %f, %f, %f)\n",
-			       inc(0), inc(1), inc(2), inc(3), inc(4), inc(5), inc(6), inc(7));
+//			// cclog
+//			printf("increment = (%f, %f, %f, %f, %f, %f, %f, %f)\n",
+//			       inc(0), inc(1), inc(2), inc(3), inc(4), inc(5), inc(6), inc(7));
 
 //[ ***step 5.3*** ] 更新状态, doStep中更新逆深度
 			SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
@@ -298,69 +298,69 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	if(snapped && snappedAt==0)
 		snappedAt = frameID;  // 位移足够的帧数
 
-		if (snapped && frameID > snappedAt+5) {
-			/* Viz */
-			auto viz               = cv::viz::Viz3d("Test");
-			auto world_coordinate  = cv::viz::WCoordinateSystem(0.08);
-			auto camera_coordinate = cv::viz::WCoordinateSystem(0.04);
-
-			auto trajectory = std::vector<cv::Point3f>();
-
-			{
-				{
-					auto viewer_pose        = cv::Point3d(0, 0, -1);
-					auto viewer_focal_point = cv::Point3d(0, 0, 0);
-					auto viewer_y_dir       = cv::Point3d(0, 1, 0);
-					auto pose               = cv::Affine3d(
-							cv::viz::makeCameraPose(viewer_pose, viewer_focal_point, viewer_y_dir));
-
-					viz.setViewerPose(pose);
-				}
-
-				world_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 2.0);
-				camera_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 1.0);
-
-				viz.showWidget("World", world_coordinate);
-				viz.showWidget("Camera", camera_coordinate);
-			}
-
-			{
-				SE3     T_12 = thisToNext.inverse();
-				cv::Mat cv_R_wc2, cv_t_wc2;
-				cv::eigen2cv(T_12.rotationMatrix(), cv_R_wc2);
-				cv::eigen2cv(T_12.translation(), cv_t_wc2);
-
-				auto pose = cv::Affine3f(cv::Affine3f::Mat3(cv_R_wc2), cv::Affine3f::Vec3(cv_t_wc2));
-
-				viz.setWidgetPose("Camera", pose);
-			}
-
-			int npts = numPoints[0];
-			Pnt* ptsl = points[0];
-
-			auto cloud = cv::Mat(1, npts, CV_32FC3);
-			auto color = cv::Mat(1, npts, CV_8UC3);
-
-			auto* cloud_ptr = cloud.ptr<cv::Point3f>();
-			auto* color_ptr = color.ptr<std::array<uint8_t, 3>>();
-
-			for(int i=0;i<npts;i++)
-			{
-				Pnt* point = ptsl+i;
-				Vec3f Pw = (Ki[0].cast<float>()) * Eigen::Vector3f(point->u, point->v, 1);
-				Pw = Pw / point->iR;
-				cloud_ptr[i] = {Pw.x(), Pw.y(), 1 / point->iR};
-
-				auto gray = uchar {255};
-				color_ptr[i] = {gray, gray, gray};
-			}
-
-			viz.showWidget("Point Cloud", cv::viz::WCloud(cloud, color));
-
-			while (true) {
-				viz.spinOnce(1, true);
-			}
-		}
+//		if (snapped && frameID > snappedAt+5) {
+//			/* Viz */
+//			auto viz               = cv::viz::Viz3d("Test");
+//			auto world_coordinate  = cv::viz::WCoordinateSystem(0.08);
+//			auto camera_coordinate = cv::viz::WCoordinateSystem(0.04);
+//
+//			auto trajectory = std::vector<cv::Point3f>();
+//
+//			{
+//				{
+//					auto viewer_pose        = cv::Point3d(0, 0, -1);
+//					auto viewer_focal_point = cv::Point3d(0, 0, 0);
+//					auto viewer_y_dir       = cv::Point3d(0, 1, 0);
+//					auto pose               = cv::Affine3d(
+//							cv::viz::makeCameraPose(viewer_pose, viewer_focal_point, viewer_y_dir));
+//
+//					viz.setViewerPose(pose);
+//				}
+//
+//				world_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 2.0);
+//				camera_coordinate.setRenderingProperty(cv::viz::LINE_WIDTH, 1.0);
+//
+//				viz.showWidget("World", world_coordinate);
+//				viz.showWidget("Camera", camera_coordinate);
+//			}
+//
+//			{
+//				SE3     T_12 = thisToNext.inverse();
+//				cv::Mat cv_R_wc2, cv_t_wc2;
+//				cv::eigen2cv(T_12.rotationMatrix(), cv_R_wc2);
+//				cv::eigen2cv(T_12.translation(), cv_t_wc2);
+//
+//				auto pose = cv::Affine3f(cv::Affine3f::Mat3(cv_R_wc2), cv::Affine3f::Vec3(cv_t_wc2));
+//
+//				viz.setWidgetPose("Camera", pose);
+//			}
+//
+//			int npts = numPoints[0];
+//			Pnt* ptsl = points[0];
+//
+//			auto cloud = cv::Mat(1, npts, CV_32FC3);
+//			auto color = cv::Mat(1, npts, CV_8UC3);
+//
+//			auto* cloud_ptr = cloud.ptr<cv::Point3f>();
+//			auto* color_ptr = color.ptr<std::array<uint8_t, 3>>();
+//
+//			for(int i=0;i<npts;i++)
+//			{
+//				Pnt* point = ptsl+i;
+//				Vec3f Pw = (Ki[0].cast<float>()) * Eigen::Vector3f(point->u, point->v, 1);
+//				Pw = Pw / point->iR;
+//				cloud_ptr[i] = {Pw.x(), Pw.y(), 1 / point->iR};
+//
+//				auto gray = uchar {255};
+//				color_ptr[i] = {gray, gray, gray};
+//			}
+//
+//			viz.showWidget("Point Cloud", cv::viz::WCloud(cloud, color));
+//
+//			while (true) {
+//				viz.spinOnce(1, true);
+//			}
+//		}
 
 
     debugPlot(0,wraps);

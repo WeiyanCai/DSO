@@ -18,7 +18,7 @@ find_package(Eigen3 REQUIRED)
 find_package(Boost COMPONENTS system thread)
 
 # optional libraries
-find_package(LibZip QUIET)
+find_package(LIBZIP QUIET)
 find_package(Pangolin 0.2 QUIET)
 find_package(OpenCV QUIET)
 
@@ -126,23 +126,23 @@ if (OpenCV_FOUND AND Pangolin_FOUND)
 	add_executable(dso_dataset ${PROJECT_SOURCE_DIR}/src/main_dso_pangolin.cpp)
 	target_link_libraries(dso_dataset dso boost_system cxsparse ${BOOST_THREAD_LIBRARY} ${LIBZIP_LIBRARY} ${Pangolin_LIBRARIES} ${OpenCV_LIBS})
 
-	message("--- compiling dso_event.")
-
-	set(CeleX_DIR ${PROJECT_SOURCE_DIR}/src/Celex5Depends)
-	set(CeleX_INCLUDE ${CeleX_DIR}/include)
-	set(CeleX_LIB ${CeleX_DIR}/lib/libCeleX.so)
-
-	add_executable(dso_event ${PROJECT_SOURCE_DIR}/src/main_dso_event.cpp)
-	target_link_libraries(dso_event dso boost_system cxsparse
-	                      ${BOOST_THREAD_LIBRARY} ${LIBZIP_LIBRARY}
-	                      ${Pangolin_LIBRARIES} ${OpenCV_LIBS}
-	                      ${CeleX_LIB})
-	target_include_directories(dso_event PUBLIC ${CeleX_INCLUDE})
-
-	add_custom_command(TARGET dso_event POST_BUILD
-	                   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-	                   ${CeleX_DIR}/config/cfg_mp
-	                   $<TARGET_FILE_DIR:dso_event>)
+#	message("--- compiling dso_event.")
+#
+#	set(CeleX_DIR ${PROJECT_SOURCE_DIR}/src/Celex5Depends)
+#	set(CeleX_INCLUDE ${CeleX_DIR}/include)
+#	set(CeleX_LIB ${CeleX_DIR}/lib/libCeleX.so)
+#
+#	add_executable(dso_event ${PROJECT_SOURCE_DIR}/src/main_dso_event.cpp)
+#	target_link_libraries(dso_event dso boost_system cxsparse
+#	                      ${BOOST_THREAD_LIBRARY} ${LIBZIP_LIBRARY}
+#	                      ${Pangolin_LIBRARIES} ${OpenCV_LIBS}
+#	                      ${CeleX_LIB})
+#	target_include_directories(dso_event PUBLIC ${CeleX_INCLUDE})
+#
+#	add_custom_command(TARGET dso_event POST_BUILD
+#	                   COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#	                   ${CeleX_DIR}/config/cfg_mp
+#	                   $<TARGET_FILE_DIR:dso_event>)
 
 else ()
 	message("--- not building dso_dataset, since either don't have openCV or Pangolin.")
