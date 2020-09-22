@@ -118,7 +118,7 @@ void AccumulatedTopHessianSSE::addPoint(EFPoint* p, EnergyFunctional const * con
 			rr += resApprox[i]*resApprox[i];
 		}
 
-		//* 计算hessian 10*10矩阵, [位姿+相机参数]
+		//* 计算hessian 10*10矩阵, [relative 位姿+相机参数]
 		acc[tid][htIDX].update(
 				rJ->Jpdc[0].data(), rJ->Jpdxi[0].data(),
 				rJ->Jpdc[1].data(), rJ->Jpdxi[1].data(),
@@ -138,8 +138,8 @@ void AccumulatedTopHessianSSE::addPoint(EFPoint* p, EnergyFunctional const * con
 
 		Vec2f Ji2_Jpdd = rJ->JIdx2 * rJ->Jpdd;
 		bd_acc +=  JI_r[0]*rJ->Jpdd[0] + JI_r[1]*rJ->Jpdd[1]; //* 残差*逆深度J
-		Hdd_acc += Ji2_Jpdd.dot(rJ->Jpdd);	//* 光度对逆深度hessian
-		Hcd_acc += rJ->Jpdc[0]*Ji2_Jpdd[0] + rJ->Jpdc[1]*Ji2_Jpdd[1]; //* 光度对内参J*光度对逆深度J
+		Hdd_acc += Ji2_Jpdd.dot(rJ->Jpdd);	//* 光度对逆深度hessian [cc]scalar, use dot product
+		Hcd_acc += rJ->Jpdc[0]*Ji2_Jpdd[0] + rJ->Jpdc[1]*Ji2_Jpdd[1]; //* 光度对内参J*光度对逆深度J 4x1 x 1x1
 
 		nres[tid]++;
 	}

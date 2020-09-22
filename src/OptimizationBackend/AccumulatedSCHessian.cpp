@@ -45,6 +45,7 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 	}
 	//* hessian + 边缘化得到hessian + 先验hessian
 	//TODO 边缘化的先验和正常的先验的不同
+	//[cc] it is a scalar
 	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF;
 
 	if(H < 1e-10) H = 1e-10;

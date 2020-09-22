@@ -108,7 +108,7 @@ private:
 	float* pc_color[PYR_LEVELS];			//!< 每层上点的颜色值
 	int pc_n[PYR_LEVELS];					//!< 每层上点的个数
 
-	// warped buffers
+	// warped buffers [cc] used for SSE
 	float* buf_warped_idepth;				//!< 投影得到的点的逆深度
 	float* buf_warped_u;					//!< 投影得到的归一化坐标
 	float* buf_warped_v;					//!< 同上

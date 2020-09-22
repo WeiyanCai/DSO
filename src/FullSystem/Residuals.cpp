@@ -86,13 +86,19 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 	float energyLeft=0;			// 
 	const Eigen::Vector3f* dIl = target->dI;
 	//const float* const Il = target->I;
-	const Mat33f &PRE_KRKiTll = precalc->PRE_KRKiTll;
+
+	//[cc] current estimate
+ 	const Mat33f &PRE_KRKiTll = precalc->PRE_KRKiTll;
 	const Vec3f &PRE_KtTll = precalc->PRE_KtTll;
+
+	//[cc] first estimate; Rth_0 & tth_0 are rot / trans from host to target
 	const Mat33f &PRE_RTll_0 = precalc->PRE_RTll_0;
 	const Vec3f &PRE_tTll_0 = precalc->PRE_tTll_0;
+
 	const float * const color = point->color;	// host帧上颜色
 	const float * const weights = point->weights;
 
+	//[cc] FIRST ESTIMATE
 	Vec2f affLL = precalc->PRE_aff_mode; // 待优化的a和b, 就是host和target合的
 	float b0 = precalc->PRE_b0_mode;		// 主帧的单独 b
 
@@ -102,10 +108,11 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 	Vec4f d_C_x, d_C_y;
 	float d_d_x, d_d_y;
 	{
-		float drescale, u, v, new_idepth;
+		float drescale, u, v, new_idepth; //[cc] drescale: inverse depth target / inverse depth host
 		float Ku, Kv;
 		Vec3f KliP;
-		
+
+		//[cc] All estimates including idepth_zero_scaled are the first estimates !
 		if(!projectPoint(point->u, point->v, point->idepth_zero_scaled, 0, 0,HCalib,
 				PRE_RTll_0,PRE_tTll_0, drescale, u, v, Ku, Kv, KliP, new_idepth))
 			{ state_NewState = ResState::OOB; return state_energy; } // 投影不在图像里, 则返回OOB
@@ -171,6 +178,7 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 	}
 
 
+	//[cc] FIRST ESIMTATE
 	{
 		J->Jpdxi[0] = d_xi_x;
 		J->Jpdxi[1] = d_xi_y;
@@ -239,12 +247,14 @@ double PointFrameResidual::linearize(CalibHessian* HCalib)
 			J->resF[idx] = residual*hw; 
 
 			//! 图像导数 dx dy
+			//[cc] ATTENTION: These two derivatives are computed using CURRENT ESTIMATE
 			J->JIdx[0][idx] = hitColor[1];
 			J->JIdx[1][idx] = hitColor[2];
 
 			//! 对光度合成后a b的导数 [Ii-b0  1]
 			//! Ij - a*Ii - b  (a = tj*e^aj / ti*e^ai,   b = bj - a*bi) 
 			//bug 正负号有影响 ???
+			//[cc] ATTENTION: These two derivatives are computed using FIRST ESTIMATE
 			J->JabF[0][idx] = drdA*hw;
 			J->JabF[1][idx] = hw;
 			
