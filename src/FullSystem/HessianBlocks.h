@@ -77,7 +77,7 @@ class EFPoint;
 #define SCALE_A_INVERSE (1.0f / SCALE_A)
 #define SCALE_B_INVERSE (1.0f / SCALE_B)
 
-//* 其中带0的是FEJ用的初始状态, 不带0的是更新的状态
+//* 其中带0的是FEJ用的初始状态, 不带0的是更新的状态(CURRENT STATE)
 struct FrameFramePrecalc
 {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;

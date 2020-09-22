@@ -432,8 +432,9 @@ namespace dso {
 			lastEnergy = linearizeAll(false);
 
 			//? 和linearizeAll计算的有啥区别
-			lastEnergyL = calcLEnergy(); // islinearized的量的能量
-			lastEnergyM = calcMEnergy(); // HM部分的能量
+			//[cc] linearizeAll only calculate the linearized part
+			lastEnergyL = calcLEnergy(); // islinearized的量的能量 [cc] Linearized Part
+			lastEnergyM = calcMEnergy(); // HM部分的能量           [cc] Marginalized Part
 
 		}
 

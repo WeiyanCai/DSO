@@ -296,7 +296,7 @@ namespace dso {
 				p->data->step = 0;
 				continue;
 			}
-			float b = p->bdSumF;
+			float b = p->bdSumF; //[cc] sum(Jd^T * r)
 			// b -= xc.dot(p->Hcd_accAF + p->Hcd_accLF); //* 减去逆深度和内参
 			b -= xc.dot(p->Hcd_accAF); //* 减去逆深度和内参
 
@@ -513,6 +513,7 @@ namespace dso {
 
 //[ ***step 1*** ] 把边缘化的帧挪到最右边, 最下边
 		//* HM bM就是边缘化点得到的
+		//[cc] check if the marg frame is the last frame in the window; if not, do the following steps
 		if ((int) fh->idx != (int) frames.size() - 1) {
 			int io    = fh->idx * 8 + CPARS;    // index of frame to move to end
 			int ntail = 8 * (nFrames - fh->idx - 1); // 边缘化帧后面的变量数
@@ -932,9 +933,10 @@ namespace dso {
 				}
 
 				//! Hx=b --->  U∑V^T*x = b  --->  ∑V^T*x = U^T*b
-				VecX     Ub      = svd.matrixU().transpose() * bFinalScaled;
-				int      setZero = 0;
-				for (int i       = 0; i < Ub.size(); i++) {
+				VecX Ub      = svd.matrixU().transpose() * bFinalScaled;
+				int  setZero = 0;
+
+				for (int i = 0; i < Ub.size(); i++) {
 					if (S[i] < setting_solverModeDelta * maxSv) //* 奇异值小的设置为0
 					{
 						Ub[i] = 0;

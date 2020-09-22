@@ -302,7 +302,7 @@ void CoarseTracker::makeCoarseDepthL0(std::vector<FrameHessian*> frameHessians)
 }
 
 
-//@ 对跟踪的最新帧和参考帧之间的残差, 求 Hessian 和 b
+//@ 对跟踪的最新帧和参考帧之间的残差, 求 Hessian 和 b [cc] construct new H&b according new refToNew and aff_g2l
 void CoarseTracker::calcGSSSE(int lvl, Mat88 &H_out, Vec8 &b_out, const SE3 &refToNew, AffLight aff_g2l)
 {
 	acc.initialize();
