@@ -25,7 +25,7 @@ find_package(OpenCV QUIET)
 # flags
 add_definitions("-DENABLE_SSE")
 set(CMAKE_CXX_FLAGS
-    "${SSE_FLAGS} -O3 -g -std=c++0x -march=native"
+    "${SSE_FLAGS} -O3 -g -std=c++17 -march=native"
     #   "${SSE_FLAGS} -O3 -g -std=c++0x -fno-omit-frame-pointer"
     )
 
@@ -53,6 +53,9 @@ set(dso_SOURCE_FILES
     ${PROJECT_SOURCE_DIR}/src/util/settings.cpp
     ${PROJECT_SOURCE_DIR}/src/util/Undistort.cpp
     ${PROJECT_SOURCE_DIR}/src/util/globalCalib.cpp
+    ${PROJECT_SOURCE_DIR}/src/CuOptBackend/CuLocalWindow.cpp
+    ${PROJECT_SOURCE_DIR}/src/CuOptBackend/CuPhotometricBA.cpp
+    ${PROJECT_SOURCE_DIR}/src/CuOptBackend/CuParameterBlock.cpp
     )
 
 
@@ -92,7 +95,7 @@ else ()
 	message("    this means there will be no image display, and image read / load functionality.")
 	set(dso_opencv_SOURCE_FILES
 	    ${PROJECT_SOURCE_DIR}/src/IOWrapper/ImageDisplay_dummy.cpp
-	    ${PROJECT_SOURCE_DIR}/src/IOWrapper/ImageRW_dummy.cpp)
+	    ${PROJECT_SOURCE_DIR}/src/IOWrapper/ImageRW_dummy.cpp src/CuOptBackend/CuLocalWindow.h src/CuOptBackend/CuLocalWindow.cpp src/CuOptBackend/CuPhotometricBA.h src/CuOptBackend/CuPhotometricBA.cpp src/CuOptBackend/CuParameterBlock.h src/CuOptBackend/CuParameterBlock.cpp)
 	set(HAS_OPENCV 0)
 endif ()
 
@@ -106,10 +109,13 @@ else ()
 	set(LIBZIP_LIBRARY "")
 endif ()
 
-
 # compile main library.
 include_directories(${CSPARSE_INCLUDE_DIR} ${CHOLMOD_INCLUDE_DIR})
 add_library(dso ${dso_SOURCE_FILES} ${dso_opencv_SOURCE_FILES} ${dso_pangolin_SOURCE_FILES})
+
+#add_subdirectory(src/CuOptBackend)
+#target_include_directories(dso PUBLIC src/CuOptBackend)
+#target_link_libraries(dso cu_opt_backend)
 
 #set_property( TARGET dso APPEND_STRING PROPERTY COMPILE_FLAGS -Wall )
 

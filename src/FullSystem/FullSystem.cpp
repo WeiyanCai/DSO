@@ -177,6 +177,8 @@ namespace dso {
 		maxIdJetVisDebug   = -1;
 		minIdJetVisTracker = -1;
 		maxIdJetVisTracker = -1;
+
+		cuLW = std::make_unique<CuLocalWindow>(&Hcalib);
 	}
 
 	FullSystem::~FullSystem() {
@@ -218,6 +220,10 @@ namespace dso {
 		delete coarseInitializer;
 		delete pixelSelector;
 		delete ef;
+
+		if (cuLW) {
+			cuLW = nullptr;
+		}
 	}
 
 	void FullSystem::setOriginalCalib(const VecXf& originalCalib, int originalW, int originalH) {
@@ -580,6 +586,173 @@ namespace dso {
 		delete[] tr;
 	}
 
+	void FullSystem::cuActivatePointsMT() {
+//[ ***step 1*** ] 阈值计算, 通过距离地图来控制数目
+		//currentMinActDist 初值为 2
+		if (cuLW->activePointsNum() < setting_desiredPointDensity * 0.66)
+			currentMinActDist -= 0.8;
+		if (cuLW->activePointsNum() < setting_desiredPointDensity * 0.8)
+			currentMinActDist -= 0.5;
+		else if (cuLW->activePointsNum() < setting_desiredPointDensity * 0.9)
+			currentMinActDist -= 0.2;
+		else if (cuLW->activePointsNum() < setting_desiredPointDensity)
+			currentMinActDist -= 0.1;
+
+		if (cuLW->activePointsNum() > setting_desiredPointDensity * 1.5)
+			currentMinActDist += 0.8;
+		if (cuLW->activePointsNum() > setting_desiredPointDensity * 1.3)
+			currentMinActDist += 0.5;
+		if (cuLW->activePointsNum() > setting_desiredPointDensity * 1.15)
+			currentMinActDist += 0.2;
+		if (cuLW->activePointsNum() > setting_desiredPointDensity)
+			currentMinActDist += 0.1;
+
+		if (currentMinActDist < 0) currentMinActDist = 0;
+		if (currentMinActDist > 4) currentMinActDist = 4;
+
+		if (!setting_debugout_runquiet)
+			printf("SPARSITY:  MinActDist %f (need %d points, have %d points)!\n",
+			       currentMinActDist, (int) (setting_desiredPointDensity), cuLW->activePointsNum());
+
+
+		FrameHessian* newestHs = cuLW->lastActiveFrame();
+
+		// Make dist map.
+		coarseDistanceMap->makeK(&Hcalib);
+		coarseDistanceMap->makeDistanceMap(cuLW->activeFrames(), newestHs);
+
+		//coarseTracker->debugPlotDistMap("distMap");
+
+		std::vector<ImmaturePoint*> toOptimize;
+		toOptimize.reserve(20000); // 待激活的点
+
+//[ ***step 2*** ] 处理未成熟点, 激活/删除/跳过
+		for (FrameHessian* host : cuLW->activeFrames())        // go through all active frames
+		{
+			if (host == newestHs) continue; //[cc] except the current frame
+
+			SE3 fhToNew = newestHs->PRE_worldToCam * host->PRE_camToWorld;
+
+			// 第0层到1层
+			Mat33f KRKi = (coarseDistanceMap->K[1] * fhToNew.rotationMatrix().cast<float>() * coarseDistanceMap->Ki[0]);
+			Vec3f  Kt   = (coarseDistanceMap->K[1] * fhToNew.translation().cast<float>());
+
+
+			for (unsigned int i = 0; i < host->immaturePoints.size(); i += 1) {
+				ImmaturePoint* ph = host->immaturePoints[i];
+				ph->idxInImmaturePoints = static_cast<int>(i);
+
+				// delete points that have never been traced successfully, or that are outlier on the last trace.
+				if (!std::isfinite(ph->idepth_max) || ph->lastTraceStatus == IPS_OUTLIER) {
+					//	immature_invalid_deleted++;
+					// remove point.
+					delete ph;
+					host->immaturePoints[i] = nullptr; // 指针赋零
+					continue;
+				}
+
+				//* 未成熟点的激活条件
+				// can activate only if this is true.
+				bool canActivate = (ph->lastTraceStatus == IPS_GOOD
+				                    || ph->lastTraceStatus == IPS_SKIPPED
+				                    || ph->lastTraceStatus == IPS_BADCONDITION
+				                    || ph->lastTraceStatus == IPS_OOB)
+				                   && ph->lastTracePixelInterval < 8
+				                   && ph->quality > setting_minTraceQuality
+				                   && (ph->idepth_max + ph->idepth_min) > 0;
+
+
+				// if I cannot activate the point, skip it. Maybe also delete it.
+				if (!canActivate) {
+					//* 删除被边缘化帧上的, 和OOB点
+					// if point will be out afterwards, delete it instead.
+					if (ph->host->flaggedForMarginalization || ph->lastTraceStatus == IPS_OOB) {
+						// immature_notReady_deleted++;
+						delete ph;
+						host->immaturePoints[i] = nullptr;
+					}
+					// immature_notReady_skipped++;
+					continue;
+				}
+
+				// see if we need to activate point due to distance map.
+				Vec3f ptp = KRKi * Vec3f(ph->u, ph->v, 1) + Kt * (0.5f * (ph->idepth_max + ph->idepth_min));
+
+				int u = ptp[0] / ptp[2] + 0.5f;
+				int v = ptp[1] / ptp[2] + 0.5f;
+
+				if ((u > 0 && v > 0 && u < wG[1] && v < hG[1])) {
+					// 距离地图 + 小数点
+					float dist = coarseDistanceMap->fwdWarpedIDDistFinal[u + wG[1] * v]
+					             + (ptp[0] - floorf((float) (ptp[0])));
+
+					if (dist >= currentMinActDist * ph->my_type) // 点越多, 距离阈值越大
+					{
+						coarseDistanceMap->addIntoDistFinal(u, v);
+						toOptimize.push_back(ph);
+					}
+				} else {
+					delete ph;
+					host->immaturePoints[i] = nullptr;
+				}
+			}
+		}
+
+		//	printf("ACTIVATE: %d. (del %d, notReady %d, marg %d, good %d, marg-skip %d)\n",
+		//			(int)toOptimize.size(), immature_deleted, immature_notReady, immature_needMarg, immature_want, immature_margskip);
+
+//[ ***step 3*** ] 优化上一步挑出来的未成熟点, 进行逆深度优化, 并得到pointhessian
+		std::vector<PointHessian*> optimized;
+		optimized.resize(toOptimize.size());
+
+		if (multiThreading) {
+			treadReduce.reduce(boost::bind(&FullSystem::activatePointsMT_Reductor,
+			                               this, &optimized, &toOptimize, _1, _2, _3, _4), 0, toOptimize.size(), 50);
+		} else {
+			activatePointsMT_Reductor(&optimized, &toOptimize, 0, toOptimize.size(), 0, 0);
+		}
+
+//[ ***step 4*** ] 把PointHessian加入到能量函数, 删除收敛的未成熟点, 或不好的点
+		for (unsigned k = 0; k < toOptimize.size(); k++) {
+			PointHessian * newpoint = optimized[k];
+			ImmaturePoint* ph       = toOptimize[k];
+
+			if (newpoint && newpoint != (PointHessian*) ((long) (-1))) {
+				newpoint->host->immaturePoints[ph->idxInImmaturePoints] = nullptr;
+				newpoint->host->pointHessians.push_back(newpoint);
+
+				ef->insertPoint(newpoint);        // 能量函数中插入点
+
+				for (PointFrameResidual* r : newpoint->residuals) {
+					ef->insertResidual(r);        // 能量函数中插入残差
+				}
+
+				assert(newpoint->efPoint);
+
+				delete ph;
+			} else if (newpoint == (PointHessian*) ((long) (-1)) || ph->lastTraceStatus == IPS_OOB) {
+				// bug: 原来的顺序错误
+				ph->host->immaturePoints[ph->idxInImmaturePoints] = nullptr;
+				delete ph;
+			} else {
+				assert(newpoint == nullptr || newpoint == (PointHessian*) ((long) (-1)));
+			}
+		}
+
+//[ ***step 5*** ] 把删除的点丢掉
+		for (FrameHessian* host : cuLW->activeFrames()) {
+			for (int i = 0; i < (int) host->immaturePoints.size(); i++) {
+				if (!host->immaturePoints[i]) {
+					//bug 如果back的也是空的呢
+					host->immaturePoints[i] = host->immaturePoints.back(); // 没有顺序要求, 直接最后一个给空的
+					host->immaturePoints.pop_back();
+					i--;
+				}
+			}
+		}
+
+
+	}
 
 //@ 激活未成熟点, 加入优化
 	void FullSystem::activatePointsMT() {
@@ -628,11 +801,13 @@ namespace dso {
 		{
 			if (host == newestHs) continue; //[cc] except the current frame
 
-			SE3    fhToNew = newestHs->PRE_worldToCam * host->PRE_camToWorld;
+			SE3 fhToNew = newestHs->PRE_worldToCam * host->PRE_camToWorld;
+
 			// 第0层到1层
-			Mat33f KRKi    = (coarseDistanceMap->K[1] * fhToNew.rotationMatrix().cast<float>()
-			                  * coarseDistanceMap->Ki[0]);
-			Vec3f  Kt      = (coarseDistanceMap->K[1] * fhToNew.translation().cast<float>());
+			Mat33f KRKi = (coarseDistanceMap->K[1] * fhToNew.rotationMatrix().cast<float>()
+			               * coarseDistanceMap->Ki[0]);
+
+			Vec3f Kt = (coarseDistanceMap->K[1] * fhToNew.translation().cast<float>());
 
 
 			for (unsigned int i = 0; i < host->immaturePoints.size(); i += 1) {
@@ -1091,6 +1266,29 @@ namespace dso {
 		delete fh;
 	}
 
+	void FullSystem::cuMakeKeyFrame(FrameHessian* fh) {
+		{
+			boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
+
+			assert(fh->shell->trackingRef != 0);
+
+			fh->shell->camToWorld = fh->shell->trackingRef->camToWorld * fh->shell->camToTrackingRef;
+			fh->setEvalPT_scaled(fh->shell->camToWorld.inverse(), fh->shell->aff_g2l);
+		}
+
+		traceNewCoarse(fh);
+
+		boost::unique_lock<boost::mutex> lock(mapMutex);
+
+		flagFramesForMarginalization(fh);
+
+		fh->frameID = allKeyFramesHistory.size();
+		allKeyFramesHistory.push_back(fh->shell);
+		cuLW->insertActiveFrame(fh);
+
+
+	}
+
 //@ 生成关键帧, 优化, 激活点, 提取点, 边缘化关键帧
 	void FullSystem::makeKeyFrame(FrameHessian* fh) {
 		auto perf_all = dso::PerfMonitor("Perf: makeKeyFrame");
@@ -1254,8 +1452,7 @@ namespace dso {
 //[ ***step 11*** ] 边缘化掉关键帧
 			//* 边缘化一帧要删除or边缘化上面所有点
 			for (unsigned int i = 0; i < frameHessians.size(); i++)
-				if (frameHessians[i]->flaggedForMarginalization)
-				{
+				if (frameHessians[i]->flaggedForMarginalization) {
 					auto perf_marg_frame = dso::PerfMonitor("Perf: makeKeyFrame | marginalizeFrame");
 					marginalizeFrame(frameHessians[i]);
 					i = 0;
